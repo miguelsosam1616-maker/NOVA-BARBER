@@ -1,0 +1,6 @@
+{
+  "name": "Nova Barber",
+  "description": "Plataforma profesional de gestión y citas en tiempo real para barberías, salones y spas en República Dominicana.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
