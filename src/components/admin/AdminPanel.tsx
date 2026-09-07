@@ -42,10 +42,19 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onSelectBusiness }) => {
     clients,
     updateClientAccountStatus,
     deleteClient,
+    appointments,
+    isRealtimeConnected,
+    lastSyncTimestamp,
+    syncWithServer,
   } = useNovaDb();
 
   // Active Admin View Tab
-  const [adminViewTab, setAdminViewTab] = useState<'businesses' | 'clients' | 'codes'>('businesses');
+  const [adminViewTab, setAdminViewTab] = useState<'businesses' | 'clients' | 'appointments' | 'codes'>('businesses');
+
+  // Appointments filter & search
+  const [aptStatusFilter, setAptStatusFilter] = useState<'all' | 'pendiente' | 'confirmada' | 'rechazada' | 'completada' | 'cancelada'>('all');
+  const [aptSearchQuery, setAptSearchQuery] = useState('');
+  const [isManualSyncing, setIsManualSyncing] = useState(false);
 
   // Local codes state to ensure instant reactive reflection upon generation/deletion
   const [localCodes, setLocalCodes] = useState<AuthCode[]>(authCodes);
@@ -257,8 +266,33 @@ Ingresa a la aplicación y colócalo junto a tu correo y teléfono para activar 
     return true;
   });
 
+  // Appointment stats and filtering
+  const pendingAppointmentsCount = appointments.filter((a) => a.status === 'pendiente').length;
+  const confirmedAppointmentsCount = appointments.filter((a) => a.status === 'confirmada').length;
+  const completedAppointmentsCount = appointments.filter((a) => a.status === 'completada').length;
+  const rejectedAppointmentsCount = appointments.filter((a) => a.status === 'rechazada').length;
+  const cancelledAppointmentsCount = appointments.filter((a) => a.status === 'cancelada').length;
+
+  const filteredAppointments = appointments.filter((apt) => {
+    if (aptStatusFilter !== 'all' && apt.status !== aptStatusFilter) return false;
+    if (aptSearchQuery.trim()) {
+      const q = aptSearchQuery.toLowerCase();
+      return (
+        apt.clientName?.toLowerCase().includes(q) ||
+        apt.clientEmail?.toLowerCase().includes(q) ||
+        apt.clientPhone?.includes(q) ||
+        apt.businessName?.toLowerCase().includes(q) ||
+        apt.businessCode?.toLowerCase().includes(q) ||
+        apt.serviceName?.toLowerCase().includes(q) ||
+        apt.barberName?.toLowerCase().includes(q) ||
+        apt.date?.includes(q)
+      );
+    }
+    return true;
+  });
+
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8 animate-in fade-in duration-300">
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6 animate-in fade-in duration-300">
       {/* Top Banner */}
       <div className="bg-gradient-to-r from-zinc-900 via-zinc-900 to-amber-950/40 border border-amber-500/30 rounded-3xl p-6 sm:p-8 shadow-xl relative overflow-hidden">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 relative z-10">
@@ -273,8 +307,7 @@ Ingresa a la aplicación y colócalo junto a tu correo y teléfono para activar 
               Control Maestro de Barberías, Clientes & Licencias
             </h1>
             <p className="text-sm text-zinc-400 mt-1 max-w-2xl">
-              Supervisa barberías y clientes registrados en tiempo real, gestiona suspensiones con bloqueo
-              inmediato en pantalla y crea códigos oficiales de acceso.
+              Supervisa barberías, clientes y agendas en tiempo real. Todas las altas de clientes, solicitudes de citas y suspensiones se reflejan de inmediato.
             </p>
           </div>
 
@@ -292,19 +325,66 @@ Ingresa a la aplicación y colócalo junto a tu correo y teléfono para activar 
               <div className="text-xl font-black text-amber-400">{clients.length}</div>
               <div className="text-[10px] font-bold text-zinc-400 uppercase">Clientes RD 👤</div>
             </div>
-            <div className="bg-zinc-950/90 border border-zinc-800 px-3.5 py-2.5 rounded-2xl text-center min-w-[90px]">
-              <div className="text-xl font-black text-zinc-200">{availableCount}</div>
-              <div className="text-[10px] font-bold text-zinc-400 uppercase">Códigos Libres</div>
+            <div className="bg-zinc-950/90 border border-blue-500/30 px-3.5 py-2.5 rounded-2xl text-center min-w-[90px]">
+              <div className="text-xl font-black text-blue-400">{appointments.length}</div>
+              <div className="text-[10px] font-bold text-zinc-400 uppercase">Citas Total 📅</div>
             </div>
           </div>
         </div>
+      </div>
+
+      {/* Real-time Status Card */}
+      <div className="bg-zinc-900/90 border border-zinc-800 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-md">
+        <div className="flex items-center gap-3">
+          <div className="relative flex h-3.5 w-3.5 shrink-0">
+            {isRealtimeConnected ? (
+              <>
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-3.5 w-3.5 bg-emerald-500"></span>
+              </>
+            ) : (
+              <span className="relative inline-flex rounded-full h-3.5 w-3.5 bg-amber-500 animate-pulse"></span>
+            )}
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-black text-white uppercase tracking-wide">
+                {isRealtimeConnected ? 'Transmisión en Vivo Activa (SSE)' : 'Conectando con el Servidor SSE...'}
+              </span>
+              <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                100% en tiempo real
+              </span>
+            </div>
+            <p className="text-[11px] text-zinc-400">
+              Cualquier nuevo cliente registrado o solicitud de cita enviada a los barberos aparece de forma instantánea sin refrescar el navegador.
+              {lastSyncTimestamp && (
+                <span className="text-zinc-500 ml-1">
+                  (Última sincronización: {new Date(lastSyncTimestamp).toLocaleTimeString('es-DO')})
+                </span>
+              )}
+            </p>
+          </div>
+        </div>
+
+        <button
+          onClick={async () => {
+            setIsManualSyncing(true);
+            await syncWithServer();
+            setTimeout(() => setIsManualSyncing(false), 600);
+          }}
+          disabled={isManualSyncing}
+          className="self-start sm:self-center px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 active:bg-zinc-600 text-zinc-200 hover:text-white rounded-xl text-xs font-bold border border-zinc-700 flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-50"
+        >
+          <RefreshCw className={`w-3.5 h-3.5 ${isManualSyncing ? 'animate-spin text-amber-400' : 'text-zinc-400'}`} />
+          <span>{isManualSyncing ? 'Sincronizando...' : 'Actualizar Ahora'}</span>
+        </button>
       </div>
 
       {/* Main Admin Navigation Tabs */}
       <div className="flex items-center gap-2 p-1.5 bg-zinc-900 border border-zinc-800 rounded-2xl overflow-x-auto">
         <button
           onClick={() => setAdminViewTab('businesses')}
-          className={`flex-1 min-w-[160px] py-3 px-4 rounded-xl text-xs font-black uppercase tracking-wider flex items-center justify-center gap-2 transition-all cursor-pointer ${
+          className={`flex-1 min-w-[150px] py-3 px-4 rounded-xl text-xs font-black uppercase tracking-wider flex items-center justify-center gap-2 transition-all cursor-pointer ${
             adminViewTab === 'businesses'
               ? 'bg-amber-500 text-zinc-950 shadow-md shadow-amber-500/20'
               : 'text-zinc-400 hover:text-white hover:bg-zinc-800/60'
@@ -321,17 +401,34 @@ Ingresa a la aplicación y colócalo junto a tu correo y teléfono para activar 
 
         <button
           onClick={() => setAdminViewTab('clients')}
-          className={`flex-1 min-w-[160px] py-3 px-4 rounded-xl text-xs font-black uppercase tracking-wider flex items-center justify-center gap-2 transition-all cursor-pointer ${
+          className={`flex-1 min-w-[170px] py-3 px-4 rounded-xl text-xs font-black uppercase tracking-wider flex items-center justify-center gap-2 transition-all cursor-pointer ${
             adminViewTab === 'clients'
               ? 'bg-amber-500 text-zinc-950 shadow-md shadow-amber-500/20'
               : 'text-zinc-400 hover:text-white hover:bg-zinc-800/60'
           }`}
         >
           <Users className="w-4 h-4" />
-          <span>Clientes Registrados ({clients.length})</span>
+          <span>Clientes ({clients.length})</span>
           {suspendedClientsCount > 0 && (
             <span className="bg-rose-600 text-white text-[10px] px-1.5 py-0.5 rounded-full font-bold ml-1">
               {suspendedClientsCount}
+            </span>
+          )}
+        </button>
+
+        <button
+          onClick={() => setAdminViewTab('appointments')}
+          className={`flex-1 min-w-[190px] py-3 px-4 rounded-xl text-xs font-black uppercase tracking-wider flex items-center justify-center gap-2 transition-all cursor-pointer ${
+            adminViewTab === 'appointments'
+              ? 'bg-amber-500 text-zinc-950 shadow-md shadow-amber-500/20'
+              : 'text-zinc-400 hover:text-white hover:bg-zinc-800/60'
+          }`}
+        >
+          <Calendar className="w-4 h-4" />
+          <span>Agendas & Citas ({appointments.length})</span>
+          {pendingAppointmentsCount > 0 && (
+            <span className="bg-rose-600 text-white text-[10px] px-1.5 py-0.5 rounded-full font-bold animate-pulse ml-1">
+              {pendingAppointmentsCount} Pendientes
             </span>
           )}
         </button>
@@ -1164,6 +1261,289 @@ Ingresa a la aplicación y colócalo junto a tu correo y teléfono para activar 
           </div>
         </div>
       </div>
+      )}
+
+      {/* SECTION: APPOINTMENTS & AGENDAS EN TIEMPO REAL */}
+      {adminViewTab === 'appointments' && (
+        <div className="bg-zinc-900 border border-zinc-800 rounded-3xl p-6 shadow-xl space-y-6 animate-in fade-in duration-200">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-zinc-800 pb-4">
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="relative flex h-3 w-3">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
+                </span>
+                <h2 className="text-xl font-black text-white flex items-center gap-2">
+                  <Calendar className="w-5 h-5 text-amber-400" />
+                  <span>Agendas & Solicitudes de Citas en Vivo</span>
+                  <span className="text-xs bg-amber-400/20 text-amber-300 font-mono px-2.5 py-0.5 rounded-full font-bold">
+                    {appointments.length} Citas
+                  </span>
+                </h2>
+              </div>
+              <p className="text-xs text-zinc-400 mt-1">
+                Monitorea en tiempo real todas las solicitudes que los clientes envían a los barberos de cualquier negocio.
+              </p>
+            </div>
+
+            {/* Quick Status Stats */}
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="bg-zinc-950 border border-amber-500/40 px-3 py-1.5 rounded-xl text-center">
+                <div className="text-xs font-black text-amber-400">{pendingAppointmentsCount}</div>
+                <div className="text-[10px] text-zinc-400 uppercase font-bold">Pendientes</div>
+              </div>
+              <div className="bg-zinc-950 border border-emerald-500/40 px-3 py-1.5 rounded-xl text-center">
+                <div className="text-xs font-black text-emerald-400">{confirmedAppointmentsCount}</div>
+                <div className="text-[10px] text-zinc-400 uppercase font-bold">Confirmadas</div>
+              </div>
+              <div className="bg-zinc-950 border border-blue-500/40 px-3 py-1.5 rounded-xl text-center">
+                <div className="text-xs font-black text-blue-400">{completedAppointmentsCount}</div>
+                <div className="text-[10px] text-zinc-400 uppercase font-bold">Completadas</div>
+              </div>
+            </div>
+          </div>
+
+          {/* Search & Status Filters */}
+          <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center justify-between">
+            <div className="relative flex-1">
+              <Search className="w-4 h-4 text-zinc-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                placeholder="Buscar por cliente, barbero, barbería, servicio, fecha..."
+                value={aptSearchQuery}
+                onChange={(e) => setAptSearchQuery(e.target.value)}
+                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-10 pr-4 py-2 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-amber-500/50"
+              />
+            </div>
+
+            <div className="flex items-center gap-1 bg-zinc-950 p-1 rounded-xl border border-zinc-800 text-xs overflow-x-auto">
+              <button
+                onClick={() => setAptStatusFilter('all')}
+                className={`px-3 py-1.5 rounded-lg font-bold transition-colors cursor-pointer shrink-0 ${
+                  aptStatusFilter === 'all' ? 'bg-amber-500 text-zinc-950' : 'text-zinc-400 hover:text-white'
+                }`}
+              >
+                Todas ({appointments.length})
+              </button>
+              <button
+                onClick={() => setAptStatusFilter('pendiente')}
+                className={`px-3 py-1.5 rounded-lg font-bold transition-colors cursor-pointer shrink-0 ${
+                  aptStatusFilter === 'pendiente' ? 'bg-amber-500 text-zinc-950 font-black' : 'text-zinc-400 hover:text-white'
+                }`}
+              >
+                Pendientes ({pendingAppointmentsCount})
+              </button>
+              <button
+                onClick={() => setAptStatusFilter('confirmada')}
+                className={`px-3 py-1.5 rounded-lg font-bold transition-colors cursor-pointer shrink-0 ${
+                  aptStatusFilter === 'confirmada' ? 'bg-emerald-500 text-zinc-950' : 'text-zinc-400 hover:text-white'
+                }`}
+              >
+                Confirmadas ({confirmedAppointmentsCount})
+              </button>
+              <button
+                onClick={() => setAptStatusFilter('completada')}
+                className={`px-3 py-1.5 rounded-lg font-bold transition-colors cursor-pointer shrink-0 ${
+                  aptStatusFilter === 'completada' ? 'bg-blue-500 text-zinc-950' : 'text-zinc-400 hover:text-white'
+                }`}
+              >
+                Completadas ({completedAppointmentsCount})
+              </button>
+              <button
+                onClick={() => setAptStatusFilter('rechazada')}
+                className={`px-3 py-1.5 rounded-lg font-bold transition-colors cursor-pointer shrink-0 ${
+                  aptStatusFilter === 'rechazada' ? 'bg-rose-500 text-zinc-950' : 'text-zinc-400 hover:text-white'
+                }`}
+              >
+                Rechazadas ({rejectedAppointmentsCount})
+              </button>
+              <button
+                onClick={() => setAptStatusFilter('cancelada')}
+                className={`px-3 py-1.5 rounded-lg font-bold transition-colors cursor-pointer shrink-0 ${
+                  aptStatusFilter === 'cancelada' ? 'bg-zinc-700 text-white' : 'text-zinc-400 hover:text-white'
+                }`}
+              >
+                Canceladas ({cancelledAppointmentsCount})
+              </button>
+            </div>
+          </div>
+
+          {/* Appointments Grid */}
+          <div className="space-y-3">
+            {filteredAppointments.length === 0 ? (
+              <div className="p-8 text-center bg-zinc-950/60 rounded-2xl border border-zinc-800/80">
+                <Calendar className="w-10 h-10 text-zinc-600 mx-auto mb-2" />
+                <p className="text-zinc-300 font-bold text-sm">No se encontraron citas con estos filtros</p>
+                <p className="text-zinc-500 text-xs mt-1">
+                  Cuando un cliente envíe una solicitud desde la vista de clientes, aparecerá aquí inmediatamente en tiempo real.
+                </p>
+              </div>
+            ) : (
+              filteredAppointments.map((apt) => {
+                const isPending = apt.status === 'pendiente';
+                const isConfirmed = apt.status === 'confirmada';
+                const isCompleted = apt.status === 'completada';
+                const isRejected = apt.status === 'rechazada';
+                const isCancelled = apt.status === 'cancelada';
+
+                return (
+                  <div
+                    key={apt.id}
+                    className={`p-4 rounded-2xl border transition-all ${
+                      isPending
+                        ? 'bg-amber-950/15 border-amber-500/40 hover:border-amber-500/60'
+                        : isConfirmed
+                        ? 'bg-emerald-950/10 border-emerald-500/30'
+                        : isCompleted
+                        ? 'bg-blue-950/10 border-blue-500/30'
+                        : isRejected
+                        ? 'bg-rose-950/10 border-rose-500/30'
+                        : 'bg-zinc-950/80 border-zinc-800'
+                    }`}
+                  >
+                    <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                      {/* Left: Client & Appointment info */}
+                      <div className="space-y-2">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span
+                            className={`text-[10px] font-black uppercase px-2.5 py-0.5 rounded-full ${
+                              isPending
+                                ? 'bg-amber-500 text-zinc-950 animate-pulse'
+                                : isConfirmed
+                                ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                                : isCompleted
+                                ? 'bg-blue-500/20 text-blue-300 border border-blue-500/30'
+                                : isRejected
+                                ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
+                                : 'bg-zinc-800 text-zinc-300'
+                            }`}
+                          >
+                            {isPending
+                              ? '🟡 Solicitud Pendiente'
+                              : isConfirmed
+                              ? '🟢 Confirmada'
+                              : isCompleted
+                              ? '🔵 Completada'
+                              : isRejected
+                              ? '🔴 Rechazada'
+                              : '⚫ Cancelada'}
+                          </span>
+
+                          <span className="text-xs font-bold text-white flex items-center gap-1.5 bg-zinc-900 px-2.5 py-1 rounded-lg border border-zinc-800">
+                            <Clock className="w-3.5 h-3.5 text-amber-400" />
+                            <span>
+                              {apt.date} • {apt.time}
+                            </span>
+                          </span>
+
+                          <span className="text-[11px] text-zinc-500 font-mono">
+                            ID: {apt.id.slice(-8)}
+                          </span>
+                        </div>
+
+                        {/* Customer & Service specifics */}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 pt-1">
+                          <div>
+                            <span className="text-[10px] text-zinc-500 font-bold uppercase block">Cliente:</span>
+                            <span className="text-xs font-bold text-zinc-200 block">{apt.clientName}</span>
+                            <span className="text-[11px] text-zinc-400">{apt.clientEmail}</span>
+                            {apt.clientPhone && (
+                              <a
+                                href={`https://wa.me/${apt.clientPhone.replace(/\D/g, '')}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-[11px] text-emerald-400 hover:underline flex items-center gap-1 mt-0.5"
+                              >
+                                <Phone className="w-3 h-3" />
+                                {apt.clientPhone}
+                              </a>
+                            )}
+                          </div>
+
+                          <div>
+                            <span className="text-[10px] text-zinc-500 font-bold uppercase block">Barbería & Barbero:</span>
+                            <span className="text-xs font-bold text-zinc-200 block">{apt.businessName}</span>
+                            <span className="text-[11px] text-amber-400 font-mono">Cód: {apt.businessCode}</span>
+                            <span className="text-[11px] text-zinc-400 block">Atiende: {apt.barberName}</span>
+                          </div>
+
+                          <div>
+                            <span className="text-[10px] text-zinc-500 font-bold uppercase block">Servicio Solicitado:</span>
+                            <span className="text-xs font-bold text-emerald-400 block">{apt.serviceName}</span>
+                            <span className="text-[11px] text-zinc-300 font-bold">
+                              RD$ {apt.servicePrice.toLocaleString('es-DO')} • {apt.serviceDuration} min
+                            </span>
+                          </div>
+                        </div>
+
+                        {apt.notes && (
+                          <div className="bg-zinc-950/60 p-2 rounded-xl border border-zinc-800 text-[11px] text-zinc-300">
+                            <span className="font-bold text-amber-400">Nota del cliente: </span>
+                            {apt.notes}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Right: Quick actions */}
+                      <div className="flex flex-wrap lg:flex-col gap-2 items-end justify-center shrink-0">
+                        {isPending && (
+                          <>
+                            <button
+                              onClick={() => db.updateAppointmentStatus(apt.id, 'confirmada')}
+                              className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all shadow-md cursor-pointer"
+                            >
+                              <Check className="w-3.5 h-3.5" />
+                              <span>Confirmar Cita</span>
+                            </button>
+                            <button
+                              onClick={() => db.updateAppointmentStatus(apt.id, 'rechazada')}
+                              className="px-3 py-1.5 bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 border border-rose-800/60 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                              <span>Rechazar</span>
+                            </button>
+                          </>
+                        )}
+
+                        {isConfirmed && (
+                          <>
+                            <button
+                              onClick={() => db.updateAppointmentStatus(apt.id, 'completada')}
+                              className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all shadow-md cursor-pointer"
+                            >
+                              <CheckCircle2 className="w-3.5 h-3.5" />
+                              <span>Marcar Completada</span>
+                            </button>
+                            <button
+                              onClick={() => db.updateAppointmentStatus(apt.id, 'cancelada')}
+                              className="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer"
+                            >
+                              <Ban className="w-3.5 h-3.5" />
+                              <span>Cancelar</span>
+                            </button>
+                          </>
+                        )}
+
+                        {onSelectBusiness && (
+                          <button
+                            onClick={() => {
+                              const biz = businesses.find((b) => b.id === apt.businessId);
+                              if (biz) onSelectBusiness(biz);
+                            }}
+                            className="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer"
+                          >
+                            <Building2 className="w-3.5 h-3.5 text-amber-400" />
+                            <span>Ver Barbería</span>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
       )}
 
       {/* CLIENT SUSPENSION & EXPIRATION MODAL */}

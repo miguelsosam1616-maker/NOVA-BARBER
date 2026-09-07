@@ -108,8 +108,163 @@ if (typeof window !== 'undefined') {
   });
 }
 
-// Background sync helpers
+// Background sync & real-time SSE listener
 let isSyncing = false;
+let isRealtimeConnected = false;
+let lastSyncTimestamp = new Date().toISOString();
+const realtimeListeners = new Set<(connected: boolean) => void>();
+
+export function getRealtimeStatus() {
+  return {
+    connected: isRealtimeConnected,
+    lastSync: lastSyncTimestamp,
+  };
+}
+
+function syncFromServerPayload(data: any): boolean {
+  if (!data) return false;
+  const { businesses, appointments, notifications, authCodes, clients, queue, dailyClosures } = data;
+  let hasChanges = false;
+  lastSyncTimestamp = new Date().toISOString();
+
+  if (Array.isArray(businesses)) {
+    const local = getStored<Business[]>(STORAGE_KEYS.BUSINESSES, []);
+    if (JSON.stringify(local) !== JSON.stringify(businesses)) {
+      setStored(STORAGE_KEYS.BUSINESSES, businesses);
+      hasChanges = true;
+    }
+  }
+
+  if (Array.isArray(appointments)) {
+    const local = getStored<Appointment[]>(STORAGE_KEYS.APPOINTMENTS, []);
+    if (JSON.stringify(local) !== JSON.stringify(appointments)) {
+      setStored(STORAGE_KEYS.APPOINTMENTS, appointments);
+      hasChanges = true;
+    }
+  }
+
+  if (Array.isArray(queue)) {
+    const local = getStored<QueueEntry[]>(STORAGE_KEYS.QUEUE, []);
+    if (JSON.stringify(local) !== JSON.stringify(queue)) {
+      setStored(STORAGE_KEYS.QUEUE, queue);
+      hasChanges = true;
+    }
+  }
+
+  if (Array.isArray(dailyClosures)) {
+    const local = getStored<DailyClosure[]>(STORAGE_KEYS.DAILY_CLOSURES, []);
+    if (JSON.stringify(local) !== JSON.stringify(dailyClosures)) {
+      setStored(STORAGE_KEYS.DAILY_CLOSURES, dailyClosures);
+      hasChanges = true;
+    }
+  }
+
+  if (Array.isArray(notifications)) {
+    const local = getStored<AppNotification[]>(STORAGE_KEYS.NOTIFICATIONS, []);
+    if (JSON.stringify(local) !== JSON.stringify(notifications)) {
+      setStored(STORAGE_KEYS.NOTIFICATIONS, notifications);
+      hasChanges = true;
+    }
+  }
+
+  if (Array.isArray(authCodes)) {
+    const local = getStored<AuthCode[]>(STORAGE_KEYS.AUTH_CODES, []);
+    const codeMap = new Map<string, AuthCode>();
+    authCodes.forEach((c: AuthCode) => codeMap.set(c.id, c));
+    local.forEach((c: AuthCode) => {
+      if (!codeMap.has(c.id)) {
+        codeMap.set(c.id, c);
+      } else {
+        const s = codeMap.get(c.id)!;
+        if (c.status === 'claimed' && s.status !== 'claimed') {
+          codeMap.set(c.id, c);
+        }
+      }
+    });
+    const mergedList = Array.from(codeMap.values()).sort(
+      (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+    );
+    if (JSON.stringify(local) !== JSON.stringify(mergedList)) {
+      setStored(STORAGE_KEYS.AUTH_CODES, mergedList);
+      hasChanges = true;
+    }
+  }
+
+  if (Array.isArray(clients)) {
+    const localClients = getStored<ClientProfile[]>(STORAGE_KEYS.CLIENTS, []);
+    const clientMap = new Map<string, ClientProfile>();
+    clients.forEach((c: ClientProfile) => {
+      clientMap.set(c.id, c);
+      if (c.email) clientMap.set(c.email.toLowerCase(), c);
+    });
+    localClients.forEach((c: ClientProfile) => {
+      const key = c.email ? c.email.toLowerCase() : c.id;
+      if (!clientMap.has(key) && !clientMap.has(c.id)) {
+        clientMap.set(c.id, c);
+      } else {
+        const existing = clientMap.get(key) || clientMap.get(c.id)!;
+        if (
+          c.statusUpdatedAt &&
+          existing.statusUpdatedAt &&
+          new Date(c.statusUpdatedAt) > new Date(existing.statusUpdatedAt)
+        ) {
+          clientMap.set(existing.id, c);
+        }
+      }
+    });
+    const uniqueClients: ClientProfile[] = [];
+    const seen = new Set<string>();
+    clientMap.forEach((val) => {
+      if (!seen.has(val.id)) {
+        seen.add(val.id);
+        uniqueClients.push(val);
+      }
+    });
+    const mergedClients = uniqueClients.sort(
+      (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+    );
+    if (JSON.stringify(localClients) !== JSON.stringify(mergedClients)) {
+      setStored(STORAGE_KEYS.CLIENTS, mergedClients);
+      hasChanges = true;
+    }
+  }
+
+  // Check current user accountStatus if business or client
+  const currUser = getStored<CurrentUser | null>(STORAGE_KEYS.CURRENT_USER, null);
+  if (currUser && currUser.role === 'business' && Array.isArray(businesses)) {
+    const myBiz = businesses.find(
+      (b: Business) => b.id === currUser.businessId || b.ownerEmail?.toLowerCase() === currUser.email?.toLowerCase()
+    );
+    if (myBiz) {
+      const bizStatus = myBiz.accountStatus === 'suspendida' ? 'suspendida' : myBiz.accountStatus === 'vencida' ? 'vencida' : 'activa';
+      if (currUser.accountStatus !== bizStatus || currUser.statusReason !== myBiz.statusReason) {
+        currUser.accountStatus = bizStatus;
+        currUser.statusReason = myBiz.statusReason;
+        setStored(STORAGE_KEYS.CURRENT_USER, currUser);
+        hasChanges = true;
+      }
+    }
+  } else if (currUser && currUser.role === 'client' && Array.isArray(clients)) {
+    const myClient = clients.find(
+      (c: ClientProfile) => c.id === currUser.clientId || c.email?.toLowerCase() === currUser.email?.toLowerCase()
+    );
+    if (myClient) {
+      const clientStatus = myClient.accountStatus || 'activa';
+      if (currUser.accountStatus !== clientStatus || currUser.statusReason !== myClient.statusReason) {
+        currUser.accountStatus = clientStatus;
+        currUser.statusReason = myClient.statusReason;
+        setStored(STORAGE_KEYS.CURRENT_USER, currUser);
+        hasChanges = true;
+      }
+    }
+  }
+
+  if (hasChanges) {
+    notifyListeners();
+  }
+  return hasChanges;
+}
+
 async function fetchServerState() {
   if (isSyncing || typeof window === 'undefined') return;
   try {
@@ -118,139 +273,208 @@ async function fetchServerState() {
     if (!res.ok) return;
     const json = await res.json();
     if (json.success && json.data) {
-      const { businesses, appointments, notifications, authCodes, clients, queue, dailyClosures } = json.data;
-      let hasChanges = false;
-
-      if (Array.isArray(businesses)) {
-        const local = getStored<Business[]>(STORAGE_KEYS.BUSINESSES, []);
-        if (JSON.stringify(local) !== JSON.stringify(businesses)) {
-          setStored(STORAGE_KEYS.BUSINESSES, businesses);
-          hasChanges = true;
-        }
-      }
-
-      if (Array.isArray(appointments)) {
-        const local = getStored<Appointment[]>(STORAGE_KEYS.APPOINTMENTS, []);
-        if (JSON.stringify(local) !== JSON.stringify(appointments)) {
-          setStored(STORAGE_KEYS.APPOINTMENTS, appointments);
-          hasChanges = true;
-        }
-      }
-
-      if (Array.isArray(queue)) {
-        const local = getStored<QueueEntry[]>(STORAGE_KEYS.QUEUE, []);
-        if (JSON.stringify(local) !== JSON.stringify(queue)) {
-          setStored(STORAGE_KEYS.QUEUE, queue);
-          hasChanges = true;
-        }
-      }
-
-      if (Array.isArray(dailyClosures)) {
-        const local = getStored<DailyClosure[]>(STORAGE_KEYS.DAILY_CLOSURES, []);
-        if (JSON.stringify(local) !== JSON.stringify(dailyClosures)) {
-          setStored(STORAGE_KEYS.DAILY_CLOSURES, dailyClosures);
-          hasChanges = true;
-        }
-      }
-
-      if (Array.isArray(notifications)) {
-        const local = getStored<AppNotification[]>(STORAGE_KEYS.NOTIFICATIONS, []);
-        if (JSON.stringify(local) !== JSON.stringify(notifications)) {
-          setStored(STORAGE_KEYS.NOTIFICATIONS, notifications);
-          hasChanges = true;
-        }
-      }
-
-      if (Array.isArray(authCodes)) {
-        const local = getStored<AuthCode[]>(STORAGE_KEYS.AUTH_CODES, []);
-        const codeMap = new Map<string, AuthCode>();
-        // Add all incoming server codes
-        authCodes.forEach((c: AuthCode) => codeMap.set(c.id, c));
-        // Keep any local codes that server might not have yet (e.g. freshly generated)
-        local.forEach((c: AuthCode) => {
-          if (!codeMap.has(c.id)) {
-            codeMap.set(c.id, c);
-          } else {
-            // Keep local claimed status if already claimed
-            const s = codeMap.get(c.id)!;
-            if (c.status === 'claimed' && s.status !== 'claimed') {
-              codeMap.set(c.id, c);
-            }
-          }
-        });
-        const mergedList = Array.from(codeMap.values()).sort(
-          (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
-        );
-        if (JSON.stringify(local) !== JSON.stringify(mergedList)) {
-          setStored(STORAGE_KEYS.AUTH_CODES, mergedList);
-          hasChanges = true;
-        }
-      }
-
-      if (Array.isArray(clients)) {
-        const localClients = getStored<ClientProfile[]>(STORAGE_KEYS.CLIENTS, []);
-        const clientMap = new Map<string, ClientProfile>();
-        clients.forEach((c: ClientProfile) => clientMap.set(c.id, c));
-        localClients.forEach((c: ClientProfile) => {
-          if (!clientMap.has(c.id)) {
-            clientMap.set(c.id, c);
-          } else {
-            const existing = clientMap.get(c.id)!;
-            if (
-              c.statusUpdatedAt &&
-              existing.statusUpdatedAt &&
-              new Date(c.statusUpdatedAt) > new Date(existing.statusUpdatedAt)
-            ) {
-              clientMap.set(c.id, c);
-            }
-          }
-        });
-        const mergedClients = Array.from(clientMap.values());
-        if (JSON.stringify(localClients) !== JSON.stringify(mergedClients)) {
-          setStored(STORAGE_KEYS.CLIENTS, mergedClients);
-          hasChanges = true;
-        }
-      }
-
-      // Check current user accountStatus if business
-      const currUser = getStored<CurrentUser | null>(STORAGE_KEYS.CURRENT_USER, null);
-      if (currUser && currUser.role === 'business' && Array.isArray(businesses)) {
-        const myBiz = businesses.find(
-          (b: Business) => b.id === currUser.businessId || b.ownerEmail?.toLowerCase() === currUser.email?.toLowerCase()
-        );
-        if (myBiz) {
-          // Accounts are active by default, only explicit administrative suspension takes effect
-          const bizStatus = myBiz.accountStatus === 'suspendida' ? 'suspendida' : 'activa';
-          if (currUser.accountStatus !== bizStatus || currUser.statusReason !== myBiz.statusReason) {
-            currUser.accountStatus = bizStatus;
-            currUser.statusReason = myBiz.statusReason;
-            setStored(STORAGE_KEYS.CURRENT_USER, currUser);
-            hasChanges = true;
-          }
-        }
-      } else if (currUser && currUser.role === 'client' && Array.isArray(clients)) {
-        const myClient = clients.find(
-          (c: ClientProfile) => c.id === currUser.clientId || c.email?.toLowerCase() === currUser.email?.toLowerCase()
-        );
-        if (myClient) {
-          const clientStatus = myClient.accountStatus || 'activa';
-          if (currUser.accountStatus !== clientStatus || currUser.statusReason !== myClient.statusReason) {
-            currUser.accountStatus = clientStatus;
-            currUser.statusReason = myClient.statusReason;
-            setStored(STORAGE_KEYS.CURRENT_USER, currUser);
-            hasChanges = true;
-          }
-        }
-      }
-
-      if (hasChanges) {
-        notifyListeners();
-      }
+      syncFromServerPayload(json.data);
     }
   } catch (e) {
     // offline or backend restarting
   } finally {
     isSyncing = false;
+  }
+}
+
+// Server-Sent Events (SSE) connection for sub-second real-time push
+let eventSource: EventSource | null = null;
+function initRealtimeStream() {
+  if (typeof window === 'undefined' || !('EventSource' in window)) return;
+  if (eventSource) {
+    try { eventSource.close(); } catch {}
+  }
+
+  try {
+    eventSource = new EventSource('/api/events');
+
+    eventSource.onopen = () => {
+      isRealtimeConnected = true;
+      lastSyncTimestamp = new Date().toISOString();
+      realtimeListeners.forEach((l) => l(true));
+      notifyListeners();
+      console.log('[Nova Realtime] 🟢 SSE Connection Established');
+    };
+
+    eventSource.onerror = () => {
+      isRealtimeConnected = false;
+      realtimeListeners.forEach((l) => l(false));
+      notifyListeners();
+    };
+
+    eventSource.addEventListener('connected', (e: MessageEvent) => {
+      try {
+        const payload = JSON.parse(e.data);
+        if (payload.data) {
+          syncFromServerPayload(payload.data);
+        }
+      } catch {}
+    });
+
+    eventSource.addEventListener('SYNC', (e: MessageEvent) => {
+      try {
+        const payload = JSON.parse(e.data);
+        syncFromServerPayload(payload);
+      } catch {}
+    });
+
+    eventSource.addEventListener('CLIENT_REGISTERED', (e: MessageEvent) => {
+      try {
+        const payload = JSON.parse(e.data);
+        if (payload.client) {
+          const clients = getStored<ClientProfile[]>(STORAGE_KEYS.CLIENTS, []);
+          const idx = clients.findIndex(
+            (c) => c.id === payload.client.id || c.email?.toLowerCase() === payload.client.email?.toLowerCase()
+          );
+          if (idx >= 0) {
+            clients[idx] = payload.client;
+          } else {
+            clients.unshift(payload.client);
+          }
+          setStored(STORAGE_KEYS.CLIENTS, clients);
+        }
+        if (Array.isArray(payload.notifications)) {
+          setStored(STORAGE_KEYS.NOTIFICATIONS, payload.notifications);
+        }
+        const curr = getStored<CurrentUser | null>(STORAGE_KEYS.CURRENT_USER, null);
+        if (curr && curr.role === 'admin') {
+          soundManager.playSuccessAlert();
+        }
+        lastSyncTimestamp = new Date().toISOString();
+        notifyListeners();
+      } catch {}
+    });
+
+    eventSource.addEventListener('APPOINTMENT_REQUESTED', (e: MessageEvent) => {
+      try {
+        const payload = JSON.parse(e.data);
+        if (payload.appointment) {
+          const apts = getStored<Appointment[]>(STORAGE_KEYS.APPOINTMENTS, []);
+          const idx = apts.findIndex((a) => a.id === payload.appointment.id);
+          if (idx >= 0) {
+            apts[idx] = payload.appointment;
+          } else {
+            apts.unshift(payload.appointment);
+          }
+          setStored(STORAGE_KEYS.APPOINTMENTS, apts);
+        }
+        if (Array.isArray(payload.notifications)) {
+          setStored(STORAGE_KEYS.NOTIFICATIONS, payload.notifications);
+        }
+        const curr = getStored<CurrentUser | null>(STORAGE_KEYS.CURRENT_USER, null);
+        if (
+          curr &&
+          (curr.role === 'admin' ||
+            (curr.role === 'business' && curr.businessId === payload.appointment?.businessId))
+        ) {
+          soundManager.playNewAppointmentAlert();
+        }
+        lastSyncTimestamp = new Date().toISOString();
+        notifyListeners();
+      } catch {}
+    });
+
+    eventSource.addEventListener('APPOINTMENT_UPDATED', (e: MessageEvent) => {
+      try {
+        const payload = JSON.parse(e.data);
+        if (payload.appointment) {
+          const apts = getStored<Appointment[]>(STORAGE_KEYS.APPOINTMENTS, []);
+          const idx = apts.findIndex((a) => a.id === payload.appointment.id);
+          if (idx >= 0) {
+            apts[idx] = payload.appointment;
+          } else {
+            apts.unshift(payload.appointment);
+          }
+          setStored(STORAGE_KEYS.APPOINTMENTS, apts);
+        }
+        if (Array.isArray(payload.notifications)) {
+          setStored(STORAGE_KEYS.NOTIFICATIONS, payload.notifications);
+        }
+        if (payload.status === 'confirmada') {
+          soundManager.playSuccessAlert();
+        }
+        lastSyncTimestamp = new Date().toISOString();
+        notifyListeners();
+      } catch {}
+    });
+
+    eventSource.addEventListener('CLIENT_STATUS_UPDATED', (e: MessageEvent) => {
+      try {
+        const payload = JSON.parse(e.data);
+        const clients = getStored<ClientProfile[]>(STORAGE_KEYS.CLIENTS, []);
+        const idx = clients.findIndex(
+          (c) => c.id === payload.clientId || c.email?.toLowerCase() === payload.clientEmail?.toLowerCase()
+        );
+        if (idx >= 0) {
+          clients[idx].accountStatus = payload.accountStatus;
+          clients[idx].statusReason = payload.statusReason;
+          setStored(STORAGE_KEYS.CLIENTS, clients);
+        }
+        const curr = getStored<CurrentUser | null>(STORAGE_KEYS.CURRENT_USER, null);
+        if (
+          curr &&
+          curr.role === 'client' &&
+          (curr.clientId === payload.clientId ||
+            curr.email?.toLowerCase() === payload.clientEmail?.toLowerCase())
+        ) {
+          curr.accountStatus = payload.accountStatus;
+          curr.statusReason = payload.statusReason;
+          setStored(STORAGE_KEYS.CURRENT_USER, curr);
+        }
+        lastSyncTimestamp = new Date().toISOString();
+        notifyListeners();
+      } catch {}
+    });
+
+    eventSource.addEventListener('BUSINESS_STATUS_UPDATED', (e: MessageEvent) => {
+      try {
+        const payload = JSON.parse(e.data);
+        const businesses = getStored<Business[]>(STORAGE_KEYS.BUSINESSES, []);
+        const idx = businesses.findIndex((b) => b.id === payload.businessId);
+        if (idx >= 0) {
+          businesses[idx].accountStatus = payload.accountStatus;
+          businesses[idx].statusReason = payload.statusReason;
+          setStored(STORAGE_KEYS.BUSINESSES, businesses);
+        }
+        const curr = getStored<CurrentUser | null>(STORAGE_KEYS.CURRENT_USER, null);
+        if (curr && curr.role === 'business' && curr.businessId === payload.businessId) {
+          curr.accountStatus = payload.accountStatus;
+          curr.statusReason = payload.statusReason;
+          setStored(STORAGE_KEYS.CURRENT_USER, curr);
+        }
+        lastSyncTimestamp = new Date().toISOString();
+        notifyListeners();
+      } catch {}
+    });
+
+    eventSource.addEventListener('QUEUE_UPDATED', (e: MessageEvent) => {
+      try {
+        const payload = JSON.parse(e.data);
+        if (Array.isArray(payload.queue)) {
+          setStored(STORAGE_KEYS.QUEUE, payload.queue);
+          lastSyncTimestamp = new Date().toISOString();
+          notifyListeners();
+        }
+      } catch {}
+    });
+
+    eventSource.addEventListener('DAILY_CLOSURE_ADDED', (e: MessageEvent) => {
+      try {
+        const payload = JSON.parse(e.data);
+        if (Array.isArray(payload.dailyClosures)) {
+          setStored(STORAGE_KEYS.DAILY_CLOSURES, payload.dailyClosures);
+          lastSyncTimestamp = new Date().toISOString();
+          notifyListeners();
+        }
+      } catch {}
+    });
+  } catch (err) {
+    console.warn('[Nova Realtime] EventSource error:', err);
   }
 }
 
@@ -276,12 +500,14 @@ async function sendServerState() {
   }
 }
 
-// Start continuous background sync (Every 2.5 seconds)
+// Start continuous background sync and SSE real-time stream
 if (typeof window !== 'undefined') {
+  initRealtimeStream();
   fetchServerState();
+  // Secondary polling safety net (every 3 seconds)
   setInterval(() => {
     fetchServerState();
-  }, 2500);
+  }, 3000);
 }
 
 export const db = {
@@ -804,6 +1030,14 @@ export const db = {
     this.broadcast({ type: 'DATA_CHANGED' });
     sendServerState();
     notifyListeners();
+
+    try {
+      fetch('/api/clients/save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(client),
+      }).catch(() => {});
+    } catch {}
   },
 
   registerOrLoginClient(email: string, name?: string): { client: ClientProfile; isNew: boolean } {
@@ -814,6 +1048,15 @@ export const db = {
       setStored(STORAGE_KEYS.CLIENT, existing);
       this.broadcast({ type: 'DATA_CHANGED' });
       notifyListeners();
+
+      try {
+        fetch('/api/clients/register', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: cleanEmail, name: existing.name, avatar: existing.avatar }),
+        }).catch(() => {});
+      } catch {}
+
       return { client: existing, isNew: false };
     }
 
@@ -831,6 +1074,15 @@ export const db = {
     };
 
     this.saveClient(newClient);
+
+    try {
+      fetch('/api/clients/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: cleanEmail, name: cleanName, avatar: newClient.avatar }),
+      }).catch(() => {});
+    } catch {}
+
     return { client: newClient, isNew: true };
   },
 
@@ -858,6 +1110,19 @@ export const db = {
       this.broadcast({ type: 'DATA_CHANGED' });
       sendServerState();
       notifyListeners();
+
+      try {
+        fetch('/api/clients/update-status', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            clientId,
+            clientEmail: clients[idx].email,
+            accountStatus: status,
+            statusReason: reason,
+          }),
+        }).catch(() => {});
+      } catch {}
     }
   },
 
@@ -867,6 +1132,14 @@ export const db = {
     this.broadcast({ type: 'DATA_CHANGED' });
     sendServerState();
     notifyListeners();
+
+    try {
+      fetch('/api/clients/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clientId }),
+      }).catch(() => {});
+    } catch {}
   },
 
   saveBusinessCodeToClient(code: string): void {
@@ -952,6 +1225,14 @@ export const db = {
     notifyListeners();
     sendServerState();
 
+    try {
+      fetch('/api/appointments/book', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newAppointment),
+      }).catch(() => {});
+    } catch {}
+
     return { success: true, appointment: newAppointment };
   },
 
@@ -1012,6 +1293,18 @@ export const db = {
     this.broadcast({ type: 'APPOINTMENT_STATUS_CHANGED', appointmentId, status: newStatus });
     notifyListeners();
     sendServerState();
+
+    try {
+      fetch('/api/appointments/update-status', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          appointmentId,
+          status: newStatus,
+          note: _note,
+        }),
+      }).catch(() => {});
+    } catch {}
 
     return { success: true, appointment: apt };
   },
@@ -1183,6 +1476,14 @@ export const db = {
     notifyListeners();
     sendServerState();
 
+    try {
+      fetch('/api/queue/add', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newEntry),
+      }).catch(() => {});
+    } catch {}
+
     return newEntry;
   },
 
@@ -1219,6 +1520,20 @@ export const db = {
     this.broadcast({ type: 'DATA_CHANGED' });
     notifyListeners();
     sendServerState();
+
+    try {
+      fetch('/api/queue/update-status', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id,
+          status,
+          paidAmount: extra?.paidAmount ?? item.paidAmount,
+          paymentMethod: extra?.paymentMethod || item.paymentMethod,
+          notes: extra?.notes,
+        }),
+      }).catch(() => {});
+    } catch {}
   },
 
   deleteQueueEntry(id: string): void {
@@ -1335,6 +1650,14 @@ export const db = {
     notifyListeners();
     sendServerState();
 
+    try {
+      fetch('/api/queue/closure', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newClosure),
+      }).catch(() => {});
+    } catch {}
+
     return { success: true, closure: newClosure };
   },
 
@@ -1418,6 +1741,8 @@ export function useNovaDb() {
   return {
     db,
     currentUser,
+    isRealtimeConnected,
+    lastSyncTimestamp,
     businesses: db.getBusinesses(),
     client: db.getClient(),
     clients: db.getClients(),

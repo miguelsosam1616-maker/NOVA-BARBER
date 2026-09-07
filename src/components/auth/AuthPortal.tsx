@@ -264,6 +264,19 @@ export const AuthPortal: React.FC<AuthPortalProps> = ({ onLoginSuccess }) => {
     // Brand new client: register 1 unique account tied to this email
     const finalName = cleanName || `Cliente ${cleanEmail.split('@')[0]}`;
     const result = db.registerOrLoginClient(cleanEmail, finalName);
+
+    try {
+      fetch('/api/clients/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: cleanEmail,
+          name: finalName,
+          avatar: result.client.avatar,
+        }),
+      }).catch(() => {});
+    } catch {}
+
     db.setCurrentUser({
       id: result.client.id,
       clientId: result.client.id,
