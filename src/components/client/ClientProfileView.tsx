@@ -16,16 +16,31 @@ import { useNovaDb } from '../../lib/store';
 import { formatRD, formatDominicanDate, formatDominicanPhone, formatTime12h, getStatusBadgeInfo } from '../../lib/utils';
 
 export const ClientProfileView: React.FC = () => {
-  const { db, client, appointments } = useNovaDb();
+  const { db, client, currentUser, appointments } = useNovaDb();
+
+  // Resolve effective client profile from client object or currentUser
+  const effectiveClient = client || {
+    id: currentUser?.id || 'client-temp',
+    name: currentUser?.name || 'Cliente Nova',
+    email: currentUser?.email || '',
+    phone: currentUser?.phone || '',
+    avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=200&auto=format&fit=crop&q=80',
+    savedBusinessCodes: [],
+    accountStatus: currentUser?.accountStatus || 'activa',
+  };
 
   const [isEditing, setIsEditing] = useState(false);
-  const [name, setName] = useState(client.name);
-  const [phone, setPhone] = useState(client.phone);
-  const [email, setEmail] = useState(client.email);
+  const [name, setName] = useState(effectiveClient.name || '');
+  const [phone, setPhone] = useState(effectiveClient.phone || '');
+  const [email, setEmail] = useState(effectiveClient.email || '');
   const [savedSuccess, setSavedSuccess] = useState(false);
 
-  // Appointments for this client
-  const clientApts = appointments.filter((a) => a.clientId === client.id);
+  // Appointments for this client (matched by ID or clean email)
+  const clientApts = appointments.filter(
+    (a) =>
+      a.clientId === effectiveClient.id ||
+      (effectiveClient.email && a.clientEmail?.toLowerCase() === effectiveClient.email.toLowerCase())
+  );
 
   // Completed history
   const completedApts = clientApts.filter((a) => a.status === 'completada');
@@ -43,12 +58,13 @@ export const ClientProfileView: React.FC = () => {
 
   const handleSaveProfile = (e: React.FormEvent) => {
     e.preventDefault();
-    db.saveClient({
-      ...client,
-      name: name.trim(),
-      phone: phone.trim(),
-      email: email.trim(),
-    });
+    const updated = {
+      ...effectiveClient,
+      name: name.trim() || effectiveClient.name,
+      phone: phone ? phone.trim() : '',
+      email: email.trim() || effectiveClient.email,
+    };
+    db.saveClient(updated);
     setIsEditing(false);
     setSavedSuccess(true);
     setTimeout(() => setSavedSuccess(false), 3000);
@@ -61,8 +77,11 @@ export const ClientProfileView: React.FC = () => {
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-5">
           <div className="flex items-center gap-4">
             <img
-              src={client.avatar}
-              alt={client.name}
+              src={
+                effectiveClient.avatar ||
+                'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=200&auto=format&fit=crop&q=80'
+              }
+              alt={effectiveClient.name}
               className="w-20 h-20 sm:w-24 sm:h-24 rounded-2xl object-cover border-2 border-amber-400 shadow-xl shrink-0"
               referrerPolicy="no-referrer"
             />
@@ -70,15 +89,15 @@ export const ClientProfileView: React.FC = () => {
               <span className="text-xs font-semibold text-amber-400 uppercase tracking-wider">
                 Cliente Nova Barber RD
               </span>
-              <h1 className="text-2xl sm:text-3xl font-black text-white">{client.name}</h1>
+              <h1 className="text-2xl sm:text-3xl font-black text-white">{effectiveClient.name}</h1>
               <div className="flex flex-wrap items-center gap-3 text-xs text-zinc-400 pt-1">
                 <span className="flex items-center gap-1">
                   <Phone className="w-3.5 h-3.5 text-emerald-400" />
-                  {formatDominicanPhone(client.phone)}
+                  {formatDominicanPhone(effectiveClient.phone)}
                 </span>
                 <span className="flex items-center gap-1">
                   <Mail className="w-3.5 h-3.5 text-zinc-500" />
-                  {client.email}
+                  {effectiveClient.email || 'Sin correo registrado'}
                 </span>
               </div>
             </div>

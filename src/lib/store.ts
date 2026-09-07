@@ -755,8 +755,9 @@ export const db = {
       };
     }
 
-    // Check if code was pre-assigned to a specific email
-    if (found.assignedEmail && found.assignedEmail.toLowerCase() !== cleanEmail) {
+    // Check if code was pre-assigned to a specific email (admin email is considered universal/unlocked)
+    const isAssignedToAdmin = found.assignedEmail && isSuperAdminEmail(found.assignedEmail);
+    if (found.assignedEmail && !isAssignedToAdmin && found.assignedEmail.toLowerCase() !== cleanEmail) {
       return {
         valid: false,
         error: `Este código de autorización fue asignado exclusivamente al correo (${found.assignedEmail}). No puede usarse con ${cleanEmail}.`,
@@ -764,7 +765,8 @@ export const db = {
     }
 
     // Check if code was already claimed by another email
-    if (found.claimedByEmail && found.claimedByEmail.toLowerCase() !== cleanEmail) {
+    const isClaimedByAdmin = found.claimedByEmail && isSuperAdminEmail(found.claimedByEmail);
+    if (found.claimedByEmail && !isClaimedByAdmin && found.claimedByEmail.toLowerCase() !== cleanEmail) {
       return {
         valid: false,
         error: `Acceso denegado: Este código ya está vinculado al correo ${found.claimedByEmail}.`,

@@ -107,6 +107,15 @@
   ],
   "notifications": [
     {
+      "id": "notif-1788746068196-32",
+      "recipientRole": "admin",
+      "title": "👤 Nuevo Cliente Registrado",
+      "message": "Primo de Prueba (testprimo@gmail.com) se registró oficialmente en Nova Barber.",
+      "type": "accepted",
+      "timestamp": "2026-09-07T01:54:28.196Z",
+      "read": false
+    },
+    {
       "recipientRole": "client",
       "recipientId": "client-christheriault880_gmail_com",
       "title": "✅ ¡Tu cita fue aceptada!",
@@ -145,7 +154,7 @@
       "id": "code-1788549373695-3511",
       "code": "NOVA-AUTH-3511",
       "status": "available",
-      "assignedEmail": "miguelsosam1616@gmail.com",
+      "assignedEmail": null,
       "note": "BARBERIA NOVA RD",
       "createdAt": "2026-09-04T19:16:13.695Z"
     },
@@ -162,5 +171,18 @@
       "claimedAt": "2026-09-04T19:16:44.396Z"
     }
   ],
-  "clients": []
+  "clients": [
+    {
+      "id": "client-1788746068196-gqtf",
+      "name": "Primo de Prueba",
+      "email": "testprimo@gmail.com",
+      "avatar": "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=200&auto=format&fit=crop&q=80",
+      "savedBusinessCodes": [],
+      "createdAt": "2026-09-07T01:54:28.196Z",
+      "lastLoginAt": "2026-09-07T01:54:28.196Z",
+      "accountStatus": "activa"
+    }
+  ],
+  "queue": [],
+  "dailyClosures": []
 }

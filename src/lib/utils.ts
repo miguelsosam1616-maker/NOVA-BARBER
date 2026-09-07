@@ -5,8 +5,9 @@ export function formatRD(amount: number): string {
   return `RD$ ${Number(amount || 0).toLocaleString('es-DO')}`;
 }
 
-// Format phone number to (809) 555-1234
-export function formatDominicanPhone(phone: string): string {
+// Format phone number to (809) 555-1234 (null-safe)
+export function formatDominicanPhone(phone?: string | null): string {
+  if (!phone || typeof phone !== 'string') return 'Sin teléfono';
   const digits = phone.replace(/\D/g, '');
   if (digits.length === 10) {
     return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
@@ -18,8 +19,10 @@ export function formatDominicanPhone(phone: string): string {
 }
 
 // Clean phone for WhatsApp URL (standard Dominican format is +1 809/829/849)
-export function getWhatsAppCleanNumber(phone: string): string {
+export function getWhatsAppCleanNumber(phone?: string | null): string {
+  if (!phone || typeof phone !== 'string') return '';
   let digits = phone.replace(/\D/g, '');
+  if (!digits) return '';
   if (digits.length === 10) {
     digits = `1${digits}`;
   }
@@ -27,8 +30,10 @@ export function getWhatsAppCleanNumber(phone: string): string {
 }
 
 // Generate direct WhatsApp chat URL with prefilled greeting in RD style
-export function getWhatsAppLink(phone: string, message: string): string {
+export function getWhatsAppLink(phone?: string | null, message: string = ''): string {
+  if (!phone) return '#';
   const cleanPhone = getWhatsAppCleanNumber(phone);
+  if (!cleanPhone) return '#';
   return `https://wa.me/${cleanPhone}?text=${encodeURIComponent(message)}`;
 }
 

@@ -823,6 +823,128 @@ app.post('/api/auth-codes/delete', (req, res) => {
   }
 });
 
+// Dedicated Auth Code Validation endpoint (instant server-side verification)
+app.post('/api/auth-codes/validate', (req, res) => {
+  try {
+    const { code, email } = req.body;
+    if (!code) {
+      return res.status(400).json({ valid: false, error: 'Código requerido' });
+    }
+    const cleanRawCode = (code || '').trim().toUpperCase();
+    const cleanEmail = (email || '').trim().toLowerCase();
+
+    // Check super admin bypass
+    if (cleanEmail === 'miguelsosam1616@gmail.com' || cleanEmail === 'financieranova0@gmail.com') {
+      return res.json({ valid: true });
+    }
+
+    // 1. Exact match
+    let found = dbState.authCodes.find((c) => c.code.trim().toUpperCase() === cleanRawCode);
+
+    // 2. Alphanumeric match (ignoring dashes/spaces)
+    if (!found) {
+      const strippedInput = cleanRawCode.replace(/[^A-Z0-9]/g, '');
+      found = dbState.authCodes.find(
+        (c) => c.code.replace(/[^A-Z0-9]/g, '').toUpperCase() === strippedInput
+      );
+    }
+
+    // 3. Digits match (e.g. "3511")
+    if (!found && /^\d{3,6}$/.test(cleanRawCode)) {
+      found = dbState.authCodes.find((c) => c.code.endsWith(`-${cleanRawCode}`) || c.code.endsWith(cleanRawCode));
+    }
+
+    if (!found) {
+      return res.json({
+        valid: false,
+        error: 'El código de autorización no existe. Verifica que esté bien escrito o solicita uno al Administrador.',
+      });
+    }
+
+    if (found.status === 'revoked') {
+      return res.json({
+        valid: false,
+        error: 'Este código de autorización ha sido revocado por el Administrador Nova.',
+      });
+    }
+
+    const isAssignedToAdmin = found.assignedEmail && (found.assignedEmail.toLowerCase() === 'miguelsosam1616@gmail.com' || found.assignedEmail.toLowerCase() === 'financieranova0@gmail.com');
+    if (found.assignedEmail && !isAssignedToAdmin && found.assignedEmail.toLowerCase() !== cleanEmail) {
+      return res.json({
+        valid: false,
+        error: `Este código de autorización fue asignado exclusivamente al correo (${found.assignedEmail}). No puede usarse con ${cleanEmail}.`,
+      });
+    }
+
+    const isClaimedByAdmin = found.claimedByEmail && (found.claimedByEmail.toLowerCase() === 'miguelsosam1616@gmail.com' || found.claimedByEmail.toLowerCase() === 'financieranova0@gmail.com');
+    if (found.claimedByEmail && !isClaimedByAdmin && found.claimedByEmail.toLowerCase() !== cleanEmail) {
+      return res.json({
+        valid: false,
+        error: `Acceso denegado: Este código ya está vinculado al correo ${found.claimedByEmail}.`,
+      });
+    }
+
+    return res.json({ valid: true, codeObj: found });
+  } catch (err: any) {
+    res.status(500).json({ valid: false, error: err.message });
+  }
+});
+
+// Dedicated Business Registration endpoint
+app.post('/api/businesses/register', (req, res) => {
+  try {
+    const { business, authCode } = req.body;
+    if (!business || !business.ownerEmail) {
+      return res.status(400).json({ success: false, error: 'Datos de barbería incompletos' });
+    }
+
+    const cleanEmail = business.ownerEmail.trim().toLowerCase();
+    const existingIdx = dbState.businesses.findIndex(
+      (b) => b.id === business.id || (b.ownerEmail && b.ownerEmail.trim().toLowerCase() === cleanEmail)
+    );
+
+    if (existingIdx >= 0) {
+      dbState.businesses[existingIdx] = { ...dbState.businesses[existingIdx], ...business };
+    } else {
+      dbState.businesses.unshift(business);
+    }
+
+    // Mark auth code as claimed
+    if (authCode) {
+      const cleanCode = authCode.trim().toUpperCase();
+      const codeObj = dbState.authCodes.find(
+        (c) => c.code.trim().toUpperCase() === cleanCode || c.code.replace(/[^A-Z0-9]/g, '') === cleanCode.replace(/[^A-Z0-9]/g, '')
+      );
+      if (codeObj) {
+        codeObj.status = 'claimed';
+        codeObj.claimedByEmail = cleanEmail;
+        codeObj.claimedBusinessId = business.id;
+        codeObj.claimedBusinessName = business.name;
+        codeObj.claimedAt = new Date().toISOString();
+      }
+    }
+
+    // Create Admin notification
+    dbState.notifications.unshift({
+      id: `notif-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      recipientRole: 'admin',
+      title: '💈 Nueva Barbería Registrada',
+      message: `${business.name} (${cleanEmail}) se registró con el código ${authCode || 'N/A'}.`,
+      type: 'accepted',
+      timestamp: new Date().toISOString(),
+      read: false,
+    });
+
+    saveDbToDisk();
+    broadcastSse('SYNC', dbState);
+    console.log(`[Nova DB] Business registered: ${business.name} (${cleanEmail})`);
+
+    res.json({ success: true, business, businesses: dbState.businesses });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // Check account status by email
 app.get('/api/business/status-check', (req, res) => {
   const email = (req.query.email as string)?.trim().toLowerCase();

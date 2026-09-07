@@ -44,12 +44,15 @@ export const BusinessProfile: React.FC<BusinessProfileProps> = ({
     { id: 'color', label: 'Colorimetría' },
   ];
 
-  const filteredServices = business.services
+  const servicesList = business.services || [];
+  const barbersList = business.barbers || [];
+
+  const filteredServices = servicesList
     .filter((s) => s.active)
     .filter((s) => (selectedCategory === 'todos' ? true : s.category === selectedCategory));
 
   const handleStartBooking = (service?: Service) => {
-    setServiceToBook(service || business.services[0] || null);
+    setServiceToBook(service || servicesList[0] || null);
     setBookingModalOpen(true);
   };
 
@@ -93,7 +96,10 @@ export const BusinessProfile: React.FC<BusinessProfileProps> = ({
         {/* Cover Photo */}
         <div className="relative h-48 sm:h-64 lg:h-72 w-full">
           <img
-            src={business.coverImage}
+            src={
+              business.coverImage ||
+              'https://images.unsplash.com/photo-1503951914875-452162b0f3f1?w=1200&auto=format&fit=crop&q=80'
+            }
             alt={business.name}
             className="w-full h-full object-cover"
             referrerPolicy="no-referrer"
@@ -111,7 +117,10 @@ export const BusinessProfile: React.FC<BusinessProfileProps> = ({
           <div className="flex flex-col sm:flex-row items-start sm:items-end justify-between gap-4">
             <div className="flex items-end gap-4">
               <img
-                src={business.logo}
+                src={
+                  business.logo ||
+                  'https://images.unsplash.com/photo-1585747860715-2ba37e788b70?w=200&auto=format&fit=crop&q=80'
+                }
                 alt={business.name}
                 className="w-24 h-24 sm:w-28 sm:h-28 rounded-2xl object-cover border-4 border-zinc-950 bg-zinc-800 shadow-2xl shrink-0"
                 referrerPolicy="no-referrer"
@@ -204,12 +213,12 @@ export const BusinessProfile: React.FC<BusinessProfileProps> = ({
             Nuestro Equipo de Barberos y Estilistas
           </h2>
           <span className="text-xs text-zinc-400">
-            {business.barbers.filter((b) => b.active).length} profesionales disponibles
+            {barbersList.filter((b) => b.active).length} profesionales disponibles
           </span>
         </div>
 
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          {business.barbers
+          {barbersList
             .filter((b) => b.active)
             .map((barber) => (
               <div
@@ -217,7 +226,10 @@ export const BusinessProfile: React.FC<BusinessProfileProps> = ({
                 className="bg-zinc-900 border border-zinc-800 rounded-2xl p-3.5 text-center flex flex-col items-center hover:border-zinc-700 transition-colors"
               >
                 <img
-                  src={barber.avatar}
+                  src={
+                    barber.avatar ||
+                    'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80'
+                  }
                   alt={barber.name}
                   className="w-16 h-16 rounded-full object-cover border-2 border-amber-500/40 shadow-md mb-2.5"
                   referrerPolicy="no-referrer"
