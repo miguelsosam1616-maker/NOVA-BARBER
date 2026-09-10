@@ -328,7 +328,9 @@ function initRealtimeStream() {
     eventSource.addEventListener('CLIENT_REGISTERED', (e: MessageEvent) => {
       try {
         const payload = JSON.parse(e.data);
-        if (payload.client) {
+        if (Array.isArray(payload.clients)) {
+          setStored(STORAGE_KEYS.CLIENTS, payload.clients);
+        } else if (payload.client) {
           const clients = getStored<ClientProfile[]>(STORAGE_KEYS.CLIENTS, []);
           const idx = clients.findIndex(
             (c) => c.id === payload.client.id || c.email?.toLowerCase() === payload.client.email?.toLowerCase()
@@ -355,7 +357,9 @@ function initRealtimeStream() {
     eventSource.addEventListener('BUSINESS_REGISTERED', (e: MessageEvent) => {
       try {
         const payload = JSON.parse(e.data);
-        if (payload.business) {
+        if (Array.isArray(payload.businesses)) {
+          setStored(STORAGE_KEYS.BUSINESSES, payload.businesses);
+        } else if (payload.business) {
           const businesses = getStored<Business[]>(STORAGE_KEYS.BUSINESSES, []);
           const idx = businesses.findIndex((b) => b.id === payload.business.id);
           if (idx >= 0) {
@@ -972,59 +976,77 @@ export const db = {
     fetchServerState();
   },
 
-  // Register a new business with admin authorization code
-  registerBusinessWithAuthCode(
-    authCodeStr: string,
-    businessData: Omit<Business, 'id' | 'code' | 'createdAt'>
-  ): { success: boolean; business?: Business; error?: string } {
+  // Register a new business directly without requiring authorization code
+  registerBusiness(
+    businessData: Omit<Business, 'id' | 'code' | 'createdAt'>,
+    optionalAuthCode?: string
+  ): { success: boolean; business: Business } {
     const cleanEmail = businessData.ownerEmail.trim().toLowerCase();
-    const cleanCode = (authCodeStr || '').trim().toUpperCase();
-
-    let finalAuthCode = cleanCode;
-    // Check validation if not super admin
-    if (!isSuperAdminEmail(cleanEmail)) {
-      const validation = this.validateAuthCodeForEmail(cleanCode, cleanEmail);
-      if (!validation.valid) {
-        return { success: false, error: validation.error };
-      }
-      if (validation.codeObj) {
-        finalAuthCode = validation.codeObj.code;
-      }
-    }
+    const cleanCode = (optionalAuthCode || '').trim().toUpperCase();
 
     const newBiz: Business = {
       ...businessData,
-      id: `biz-${Date.now()}`,
+      id: `biz-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
       code: generateBusinessCode(businessData.type),
       accountStatus: 'activa',
-      authCodeUsed: finalAuthCode,
+      authCodeUsed: cleanCode || undefined,
       createdAt: new Date().toISOString(),
     };
 
-    // Save business
+    // Save business locally
     this.saveBusiness(newBiz);
 
-    // Bind and mark code as claimed
-    const codes = this.getAuthCodes();
-    const foundCode = codes.find(
-      (c) =>
-        c.code.trim().toUpperCase() === finalAuthCode.trim().toUpperCase() ||
-        c.code.replace(/[^A-Z0-9]/g, '') === finalAuthCode.replace(/[^A-Z0-9]/g, '')
-    );
-    if (foundCode) {
-      foundCode.status = 'claimed';
-      foundCode.claimedByEmail = cleanEmail;
-      foundCode.claimedBusinessId = newBiz.id;
-      foundCode.claimedBusinessName = newBiz.name;
-      foundCode.claimedAt = new Date().toISOString();
-      setStored(STORAGE_KEYS.AUTH_CODES, codes);
+    // If an optional code was supplied, mark it as claimed
+    if (cleanCode) {
+      const codes = this.getAuthCodes();
+      const foundCode = codes.find(
+        (c) =>
+          c.code.trim().toUpperCase() === cleanCode ||
+          c.code.replace(/[^A-Z0-9]/g, '') === cleanCode.replace(/[^A-Z0-9]/g, '')
+      );
+      if (foundCode) {
+        foundCode.status = 'claimed';
+        foundCode.claimedByEmail = cleanEmail;
+        foundCode.claimedBusinessId = newBiz.id;
+        foundCode.claimedBusinessName = newBiz.name;
+        foundCode.claimedAt = new Date().toISOString();
+        setStored(STORAGE_KEYS.AUTH_CODES, codes);
+      }
     }
 
     this.broadcast({ type: 'DATA_CHANGED' });
     notifyListeners();
     sendServerState();
 
+    // Call server to persist and broadcast to Admin in real time
+    try {
+      fetch('/api/businesses/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ business: newBiz, authCode: cleanCode || undefined }),
+      })
+        .then(async (res) => {
+          if (res.ok) {
+            const json = await res.json();
+            if (json.success && Array.isArray(json.businesses)) {
+              setStored(STORAGE_KEYS.BUSINESSES, json.businesses);
+              notifyListeners();
+            }
+          }
+        })
+        .catch((e) => console.warn('Error registering business on server:', e));
+    } catch {}
+
     return { success: true, business: newBiz };
+  },
+
+  // Register a new business (legacy compat: codes are optional, no longer required)
+  registerBusinessWithAuthCode(
+    authCodeStr: string,
+    businessData: Omit<Business, 'id' | 'code' | 'createdAt'>
+  ): { success: boolean; business?: Business; error?: string } {
+    const res = this.registerBusiness(businessData, authCodeStr);
+    return { success: res.success, business: res.business };
   },
 
   updateBusinessServices(businessId: string, services: Service[]) {
@@ -1127,11 +1149,15 @@ export const db = {
     notifyListeners();
   },
 
-  registerOrLoginClient(email: string, name?: string): { client: ClientProfile; isNew: boolean } {
+  registerOrLoginClient(email: string, name?: string, phone?: string): { client: ClientProfile; isNew: boolean } {
     const cleanEmail = email.trim().toLowerCase();
     const existing = this.getClientByEmail(cleanEmail);
     if (existing) {
       // 1 email = 1 account. Already registered!
+      if (phone && !existing.phone) {
+        existing.phone = phone.trim();
+        this.saveClient(existing);
+      }
       setStored(STORAGE_KEYS.CLIENT, existing);
       this.broadcast({ type: 'DATA_CHANGED' });
       notifyListeners();
@@ -1140,7 +1166,13 @@ export const db = {
         fetch('/api/clients/register', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email: cleanEmail, name: existing.name, avatar: existing.avatar }),
+          body: JSON.stringify({
+            client: existing,
+            email: cleanEmail,
+            name: existing.name,
+            phone: existing.phone || phone,
+            avatar: existing.avatar,
+          }),
         }).catch(() => {});
       } catch {}
 
@@ -1150,10 +1182,12 @@ export const db = {
     // Create new single account
     const clientId = `client-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`;
     const cleanName = name && name.trim() ? name.trim() : `Cliente ${cleanEmail.split('@')[0]}`;
+    const cleanPhone = phone && phone.trim() ? phone.trim() : '';
     const newClient: ClientProfile = {
       id: clientId,
       name: cleanName,
       email: cleanEmail,
+      phone: cleanPhone,
       avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=200&auto=format&fit=crop&q=80',
       savedBusinessCodes: [],
       createdAt: new Date().toISOString(),
@@ -1166,7 +1200,13 @@ export const db = {
       fetch('/api/clients/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: cleanEmail, name: cleanName, avatar: newClient.avatar }),
+        body: JSON.stringify({
+          client: newClient,
+          email: cleanEmail,
+          name: cleanName,
+          phone: cleanPhone,
+          avatar: newClient.avatar,
+        }),
       }).catch(() => {});
     } catch {}
 

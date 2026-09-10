@@ -62,6 +62,15 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onSelectBusiness }) => {
     setLocalCodes(authCodes);
   }, [authCodes]);
 
+  // Guaranteed real-time polling backup in addition to SSE
+  useEffect(() => {
+    syncWithServer();
+    const interval = setInterval(() => {
+      syncWithServer();
+    }, 3500);
+    return () => clearInterval(interval);
+  }, [syncWithServer]);
+
   // Generator inputs
   const [newNote, setNewNote] = useState('');
   const [newAssignedEmail, setNewAssignedEmail] = useState('');

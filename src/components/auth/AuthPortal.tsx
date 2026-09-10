@@ -14,6 +14,7 @@ import {
   Lock,
   PlusCircle,
   HelpCircle,
+  MapPin,
 } from 'lucide-react';
 import { useNovaDb } from '../../lib/store';
 import { ADMIN_EMAIL, isSuperAdminEmail } from '../../data/seedData';
@@ -33,7 +34,10 @@ export const AuthPortal: React.FC<AuthPortalProps> = ({ onLoginSuccess }) => {
 
   // Business / Barber Form State
   const [bizEmail, setBizEmail] = useState('');
+  const [bizName, setBizName] = useState('');
+  const [bizOwnerName, setBizOwnerName] = useState('');
   const [bizPhone, setBizPhone] = useState('');
+  const [bizCity, setBizCity] = useState('Santo Domingo');
   const [bizCode, setBizCode] = useState('');
   const [bizError, setBizError] = useState('');
   const [isRegisteringBiz, setIsRegisteringBiz] = useState(false);
@@ -49,6 +53,7 @@ export const AuthPortal: React.FC<AuthPortalProps> = ({ onLoginSuccess }) => {
   // Client Form State
   const [clientName, setClientName] = useState('');
   const [clientEmail, setClientEmail] = useState('');
+  const [clientPhone, setClientPhone] = useState('');
   const [clientError, setClientError] = useState('');
   const [bizLoading, setBizLoading] = useState(false);
   const [clientLoading, setClientLoading] = useState(false);
@@ -60,9 +65,13 @@ export const AuthPortal: React.FC<AuthPortalProps> = ({ onLoginSuccess }) => {
     statusUpdatedAt?: string;
   } | null>(null);
 
-  const isAdminEmail = isSuperAdminEmail(bizEmail);
+  const cleanBizEmail = bizEmail.trim().toLowerCase();
+  const isAdminEmail = isSuperAdminEmail(cleanBizEmail);
+  const existingBiz = cleanBizEmail
+    ? businesses.find((b) => b.ownerEmail.toLowerCase() === cleanBizEmail) || db.getBusinessByOwnerEmail(cleanBizEmail)
+    : null;
 
-  // Handle Business / Admin Login
+  // Handle Business / Barber / Admin Login
   const handleBusinessAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     setBizError('');
@@ -70,7 +79,7 @@ export const AuthPortal: React.FC<AuthPortalProps> = ({ onLoginSuccess }) => {
 
     const cleanEmail = bizEmail.trim().toLowerCase();
     const cleanPhone = bizPhone.trim();
-    const cleanCode = bizCode.trim().toUpperCase();
+    const finalPhone = cleanPhone && cleanPhone.length >= 7 ? cleanPhone : '809-555-0000';
 
     if (!cleanEmail || !cleanEmail.includes('@')) {
       setBizError('Por favor introduce un correo electrónico válido.');
@@ -85,154 +94,133 @@ export const AuthPortal: React.FC<AuthPortalProps> = ({ onLoginSuccess }) => {
         id: 'user-admin-nova',
         email: cleanEmail,
         name: 'Super Administrador Nova',
-        phone: cleanPhone.length >= 7 ? cleanPhone : '809-555-0000',
+        phone: finalPhone,
         role: 'admin',
         businessId: adminBiz?.id,
-        authCode: cleanCode || 'NOVA-SUPER-ADMIN',
+        authCode: 'NOVA-SUPER-ADMIN',
       });
       setBizLoading(false);
       onLoginSuccess();
       return;
     }
 
-    // 2. NORMAL BARBER / BUSINESS OWNER CHECK
-    if (!cleanCode) {
-      setBizError('Debes ingresar el código de autorización generado en la cuenta de Administrador.');
-      setBizLoading(false);
-      return;
-    }
+    // 2. EXISTING BUSINESS: Verify account status (active vs suspended/vencida)
+    const currentExistingBiz =
+      db.getBusinessByOwnerEmail(cleanEmail) ||
+      businesses.find((b) => b.ownerEmail.toLowerCase() === cleanEmail);
 
-    // Validate the authorization code online with server (supports cross-browser sync)
-    const validation = await db.validateAuthCodeOnline(cleanCode, cleanEmail);
-    if (!validation.valid) {
-      setBizError(validation.error || 'Código de autorización no válido.');
-      setBizLoading(false);
-      return;
-    }
-
-    const validCodeObj = validation.codeObj;
-    const officialCode = validCodeObj?.code || cleanCode;
-    const finalPhone = cleanPhone && cleanPhone.length >= 7 ? cleanPhone : '809-555-0000';
-
-    if (validCodeObj) {
-      db.saveAuthCode(validCodeObj);
-    }
-
-    // Check if a business is already registered with this email
-    let existingBiz = db.getBusinessByOwnerEmail(cleanEmail);
-
-    // If not registered yet, auto-provision and activate immediately with the authorized code!
-    if (!existingBiz) {
-      const defaultName =
-        validCodeObj?.note?.trim() ||
-        `Barbería ${cleanEmail.split('@')[0].replace(/[^a-zA-Z0-9]/g, ' ').toUpperCase()}`;
-
-      const newBizData = {
-        name: defaultName,
-        type: 'barberia' as const,
-        ownerName: defaultName,
-        ownerEmail: cleanEmail,
-        phone: finalPhone,
-        address: 'República Dominicana',
-        city: 'Santo Domingo',
-        description: 'Barbería profesional registrada oficialmente en Nova Barber RD.',
-        openingHour: '08:00',
-        closingHour: '20:00',
-        workDays: [1, 2, 3, 4, 5, 6],
-        slotDurationMinutes: 30,
-        logo: 'https://images.unsplash.com/photo-1585747860715-2ba37e788b70?w=200&auto=format&fit=crop&q=80',
-        coverImage:
-          'https://images.unsplash.com/photo-1503951914875-452162b0f3f1?w=1200&auto=format&fit=crop&q=80',
-        services: [
-          {
-            id: `srv-${Date.now()}-1`,
-            name: 'Corte Clásico Degradado (Fade)',
-            description: 'Servicio estándar con cerquillo milimétrico y peinado final.',
-            price: 500,
-            duration: 30,
-            category: 'cortes' as const,
-            active: true,
-          },
-          {
-            id: `srv-${Date.now()}-2`,
-            name: 'Corte + Barba y Toalla Caliente',
-            description: 'Combo completo para el máximo cuidado.',
-            price: 800,
-            duration: 45,
-            category: 'combos' as const,
-            active: true,
-          },
-        ],
-        barbers: [
-          {
-            id: `barb-${Date.now()}-1`,
-            name: 'Barbero Principal',
-            nickname: 'El Barbero',
-            avatar:
-              'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80',
-            phone: finalPhone,
-            specialties: ['Degradados', 'Barba', 'Navaja'],
-            workDays: [1, 2, 3, 4, 5, 6],
-            workHours: { start: '08:00', end: '20:00' },
-            active: true,
-            commissionRate: 50,
-          },
-        ],
-        expenses: [],
-      };
-
-      const registration = db.registerBusinessWithAuthCode(officialCode, newBizData);
-      if (registration.success && registration.business) {
-        existingBiz = registration.business;
-      }
-
-      // Also register on server backend
-      try {
-        await fetch('/api/businesses/register', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            business: existingBiz || {
-              ...newBizData,
-              id: `biz-${Date.now()}`,
-              code: 'NV-RD-01',
-              authCodeUsed: officialCode,
-              accountStatus: 'activa',
-              createdAt: new Date().toISOString(),
-            },
-            authCode: officialCode,
-          }),
+    if (currentExistingBiz) {
+      if (currentExistingBiz.accountStatus === 'suspendida' || currentExistingBiz.accountStatus === 'vencida') {
+        setBlockedAccountData({
+          businessName: currentExistingBiz.name,
+          ownerEmail: currentExistingBiz.ownerEmail,
+          ownerPhone: currentExistingBiz.phone,
+          accountStatus: currentExistingBiz.accountStatus,
+          statusReason: currentExistingBiz.statusReason,
+          statusUpdatedAt: currentExistingBiz.statusUpdatedAt,
         });
-      } catch (err) {
-        console.warn('Backend business registration error:', err);
-      }
-    }
-
-    if (existingBiz) {
-      if (existingBiz.accountStatus === 'vencida' || existingBiz.accountStatus === 'suspendida') {
-        existingBiz.accountStatus = 'activa';
-        existingBiz.statusReason = undefined;
-        existingBiz.statusUpdatedAt = new Date().toISOString();
-        db.saveBusiness(existingBiz);
+        setBizLoading(false);
+        return;
       }
 
       db.setCurrentUser({
         id: `user-${Date.now()}`,
         email: cleanEmail,
-        name: existingBiz.ownerName || existingBiz.name,
-        phone: finalPhone,
+        name: currentExistingBiz.ownerName || currentExistingBiz.name,
+        phone: currentExistingBiz.phone || finalPhone,
         role: 'business',
-        businessId: existingBiz.id,
-        authCode: officialCode,
+        businessId: currentExistingBiz.id,
+        authCode: currentExistingBiz.authCodeUsed || currentExistingBiz.code,
         accountStatus: 'activa',
         statusReason: undefined,
       });
       setBizLoading(false);
       onLoginSuccess();
-    } else {
-      setBizError('Ocurrió un inconveniente al activar la barbería. Por favor intenta de nuevo.');
-      setBizLoading(false);
+      return;
     }
+
+    // 3. NEW BARBER / BUSINESS OWNER: Direct registration without requiring codes!
+    const cleanBizName = bizName.trim();
+    if (!cleanBizName) {
+      setBizError('Por favor ingresa el nombre de tu barbería o salón.');
+      setBizLoading(false);
+      return;
+    }
+
+    const cleanOwnerName = bizOwnerName.trim() || cleanBizName;
+    const finalCity = bizCity.trim() || 'Santo Domingo';
+    const optionalCode = bizCode.trim().toUpperCase();
+
+    const newBizData: Omit<Business, 'id' | 'code' | 'createdAt'> = {
+      name: cleanBizName,
+      type: 'barberia',
+      ownerName: cleanOwnerName,
+      ownerEmail: cleanEmail,
+      phone: finalPhone,
+      address: `${finalCity}, República Dominicana`,
+      city: finalCity,
+      description: `Barbería oficial en Nova Barber RD. Servicios de barbería y estilismo en ${finalCity}.`,
+      openingHour: '08:00',
+      closingHour: '20:00',
+      workDays: [1, 2, 3, 4, 5, 6],
+      slotDurationMinutes: 30,
+      logo: 'https://images.unsplash.com/photo-1585747860715-2ba37e788b70?w=200&auto=format&fit=crop&q=80',
+      coverImage:
+        'https://images.unsplash.com/photo-1503951914875-452162b0f3f1?w=1200&auto=format&fit=crop&q=80',
+      services: [
+        {
+          id: `srv-${Date.now()}-1`,
+          name: 'Corte Clásico Degradado (Fade)',
+          description: 'Servicio estándar con cerquillo milimétrico y peinado final.',
+          price: 500,
+          duration: 30,
+          category: 'cortes',
+          active: true,
+        },
+        {
+          id: `srv-${Date.now()}-2`,
+          name: 'Corte + Barba y Toalla Caliente',
+          description: 'Combo completo para el máximo cuidado.',
+          price: 800,
+          duration: 45,
+          category: 'combos',
+          active: true,
+        },
+      ],
+      barbers: [
+        {
+          id: `barb-${Date.now()}-1`,
+          name: cleanOwnerName,
+          nickname: 'El Barbero',
+          avatar:
+            'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80',
+          phone: finalPhone,
+          specialties: ['Degradados', 'Barba', 'Navaja'],
+          workDays: [1, 2, 3, 4, 5, 6],
+          workHours: { start: '08:00', end: '20:00' },
+          active: true,
+          commissionRate: 50,
+        },
+      ],
+      expenses: [],
+    };
+
+    const registration = db.registerBusiness(newBizData, optionalCode);
+    const registeredBiz = registration.business;
+
+    db.setCurrentUser({
+      id: `user-${Date.now()}`,
+      email: cleanEmail,
+      name: registeredBiz.ownerName || registeredBiz.name,
+      phone: registeredBiz.phone,
+      role: 'business',
+      businessId: registeredBiz.id,
+      authCode: registeredBiz.code,
+      accountStatus: 'activa',
+    });
+
+    setBizLoading(false);
+    onLoginSuccess();
   };
 
   // Handle Client Login / Register
@@ -243,6 +231,7 @@ export const AuthPortal: React.FC<AuthPortalProps> = ({ onLoginSuccess }) => {
 
     const cleanEmail = clientEmail.trim().toLowerCase();
     const cleanName = clientName.trim();
+    const cleanPhone = clientPhone.trim();
 
     if (!cleanEmail || !cleanEmail.includes('@') || !cleanEmail.includes('.')) {
       setClientError('Por favor introduce un correo electrónico válido (ejemplo: usuario@gmail.com).');
@@ -257,7 +246,7 @@ export const AuthPortal: React.FC<AuthPortalProps> = ({ onLoginSuccess }) => {
         id: 'user-admin-nova',
         email: cleanEmail,
         name: cleanName || 'Super Administrador Nova',
-        phone: '809-555-0000',
+        phone: cleanPhone || '809-555-0000',
         role: 'admin',
         businessId: adminBiz?.id,
         authCode: 'NOVA-SUPER-ADMIN',
@@ -269,6 +258,7 @@ export const AuthPortal: React.FC<AuthPortalProps> = ({ onLoginSuccess }) => {
 
     const existing = db.getClientByEmail(cleanEmail);
     const finalName = cleanName || (existing ? existing.name : `Cliente ${cleanEmail.split('@')[0]}`);
+    const finalPhone = cleanPhone || existing?.phone || undefined;
 
     // Call server to ensure real-time persistence and immediate admin broadcast
     let serverClient: ClientProfile | null = null;
@@ -279,6 +269,7 @@ export const AuthPortal: React.FC<AuthPortalProps> = ({ onLoginSuccess }) => {
         body: JSON.stringify({
           email: cleanEmail,
           name: finalName,
+          phone: finalPhone,
           avatar: existing?.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=200&auto=format&fit=crop&q=80',
         }),
       });
@@ -296,7 +287,7 @@ export const AuthPortal: React.FC<AuthPortalProps> = ({ onLoginSuccess }) => {
     }
 
     const clientRecord: ClientProfile =
-      serverClient || existing || db.registerOrLoginClient(cleanEmail, finalName).client;
+      serverClient || existing || db.registerOrLoginClient(cleanEmail, finalName, finalPhone).client;
 
     if (clientRecord.accountStatus === 'suspendida' || clientRecord.accountStatus === 'vencida') {
       setBlockedClientData({
@@ -316,6 +307,7 @@ export const AuthPortal: React.FC<AuthPortalProps> = ({ onLoginSuccess }) => {
       clientId: clientRecord.id,
       email: clientRecord.email,
       name: clientRecord.name,
+      phone: clientRecord.phone,
       role: 'client',
       accountStatus: clientRecord.accountStatus || 'activa',
     });
@@ -406,10 +398,9 @@ export const AuthPortal: React.FC<AuthPortalProps> = ({ onLoginSuccess }) => {
                     Acceso Profesional con Código
                   </span>
                 </div>
-                <h2 className="text-xl font-black text-white">Iniciar Sesión como Barbería</h2>
+                <h2 className="text-xl font-black text-white">Portal de Barberos & Negocios</h2>
                 <p className="text-xs text-zinc-400 mt-1 leading-relaxed">
-                  Para registrarse o entrar, cada cuenta de barbero requiere su correo, teléfono y el{' '}
-                  <strong className="text-amber-300">código único</strong> asignado por el Administrador.
+                  Inicia sesión en tu barbería o crea tu cuenta de barbero al instante sin códigos.
                 </p>
               </div>
 
@@ -426,7 +417,20 @@ export const AuthPortal: React.FC<AuthPortalProps> = ({ onLoginSuccess }) => {
                   <div>
                     <strong className="text-white text-sm block">Cuenta de Administrador General</strong>
                     <div className="text-[11px] text-zinc-300 mt-0.5">
-                      Correo reconocido. Presiona <strong>Acceder como Administrador</strong> para entrar directamente a tu panel.
+                      Correo reconocido como Super Admin. Presiona el botón para entrar a tu Panel de Control.
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {existingBiz && !isAdminEmail && (
+                <div className="mb-4 p-3.5 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-emerald-300 text-xs flex items-center gap-2.5">
+                  <CheckCircle2 className="w-5 h-5 shrink-0 text-emerald-400" />
+                  <div>
+                    <strong className="text-white text-sm block">Barbería Registrada: {existingBiz.name}</strong>
+                    <div className="text-[11px] text-zinc-300 mt-0.5">
+                      {existingBiz.ownerName} • {existingBiz.city} • Estado:{' '}
+                      <span className="font-bold text-emerald-400 uppercase">{existingBiz.accountStatus || 'activa'}</span>
                     </div>
                   </div>
                 </div>
@@ -448,51 +452,126 @@ export const AuthPortal: React.FC<AuthPortalProps> = ({ onLoginSuccess }) => {
                   />
                   {isAdminEmail && (
                     <span className="text-[11px] text-amber-400 font-semibold mt-1 block">
-                      ✓ Correo verificado como Administrador General
+                      ✓ Acceso exclusivo de Super Administrador Nova
                     </span>
                   )}
                 </div>
 
-                {!isAdminEmail && (
+                {!isAdminEmail && !existingBiz && (
                   <>
-                    <div>
-                      <label className="block text-xs font-bold text-zinc-300 mb-1.5 flex items-center justify-between">
-                        <span className="flex items-center gap-1.5">
-                          <Phone className="w-3.5 h-3.5 text-amber-400" />
-                          Número de Teléfono (WhatsApp RD)
-                        </span>
-                        <span className="text-[10px] text-zinc-500 font-normal">Opcional</span>
-                      </label>
-                      <input
-                        type="tel"
-                        value={bizPhone}
-                        onChange={(e) => setBizPhone(e.target.value)}
-                        placeholder="809-555-0142 (Opcional)"
-                        className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3.5 py-2.5 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-amber-400 transition-colors"
-                      />
+                    <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl text-xs text-amber-200 flex items-center gap-2">
+                      <Sparkles className="w-4 h-4 text-amber-400 shrink-0" />
+                      <span>
+                        ¡Registro libre y gratuito! Completa estos datos para crear tu barbería y aparecer en el catálogo.
+                      </span>
                     </div>
 
                     <div>
                       <label className="block text-xs font-bold text-zinc-300 mb-1.5 flex items-center justify-between">
                         <span className="flex items-center gap-1.5">
-                          <KeyRound className="w-3.5 h-3.5 text-amber-400" />
-                          Código de Autorización del Admin
+                          <Scissors className="w-3.5 h-3.5 text-amber-400" />
+                          Nombre de tu Barbería o Salón
                         </span>
                         <span className="text-[10px] text-amber-400 font-medium">Requerido</span>
                       </label>
                       <input
                         type="text"
                         required
+                        value={bizName}
+                        onChange={(e) => setBizName(e.target.value)}
+                        placeholder="Ej: Barbería Flow Urbano RD"
+                        className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3.5 py-2.5 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-amber-400 transition-colors"
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs font-bold text-zinc-300 mb-1.5 flex items-center gap-1.5">
+                          <User className="w-3.5 h-3.5 text-amber-400" />
+                          Tu Nombre (Dueño/Barbero)
+                        </label>
+                        <input
+                          type="text"
+                          value={bizOwnerName}
+                          onChange={(e) => setBizOwnerName(e.target.value)}
+                          placeholder="Ej: Carlos Ramírez"
+                          className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3.5 py-2.5 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-amber-400 transition-colors"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-bold text-zinc-300 mb-1.5 flex items-center gap-1.5">
+                          <Phone className="w-3.5 h-3.5 text-amber-400" />
+                          Teléfono / WhatsApp RD
+                        </label>
+                        <input
+                          type="tel"
+                          value={bizPhone}
+                          onChange={(e) => setBizPhone(e.target.value)}
+                          placeholder="809-555-0142"
+                          className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3.5 py-2.5 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-amber-400 transition-colors"
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-zinc-300 mb-1.5 flex items-center gap-1.5">
+                        <MapPin className="w-3.5 h-3.5 text-amber-400" />
+                        Ciudad en República Dominicana
+                      </label>
+                      <select
+                        value={bizCity}
+                        onChange={(e) => setBizCity(e.target.value)}
+                        className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-amber-400 transition-colors cursor-pointer"
+                      >
+                        <option value="Santo Domingo">Santo Domingo (DN / Este / Oeste / Norte)</option>
+                        <option value="Santiago">Santiago de los Caballeros</option>
+                        <option value="La Vega">La Vega</option>
+                        <option value="Puerto Plata">Puerto Plata</option>
+                        <option value="San Cristóbal">San Cristóbal</option>
+                        <option value="San Pedro de Macorís">San Pedro de Macorís</option>
+                        <option value="La Romana">La Romana</option>
+                        <option value="Higüey / Bávaro / Punta Cana">Higüey / Bávaro / Punta Cana</option>
+                        <option value="Bonao">Bonao</option>
+                        <option value="Moca">Moca</option>
+                        <option value="San Francisco de Macorís">San Francisco de Macorís</option>
+                        <option value="Barahona">Barahona</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-zinc-300 mb-1.5 flex items-center justify-between">
+                        <span className="flex items-center gap-1.5">
+                          <KeyRound className="w-3.5 h-3.5 text-zinc-500" />
+                          Código Promocional / Autorización
+                        </span>
+                        <span className="text-[10px] text-zinc-500 font-normal">Opcional</span>
+                      </label>
+                      <input
+                        type="text"
                         value={bizCode}
                         onChange={(e) => setBizCode(e.target.value.toUpperCase())}
-                        placeholder="Ej: NOVA-AUTH-2026"
+                        placeholder="NOVA-AUTH (Opcional)"
                         className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3.5 py-2.5 text-sm text-white placeholder-zinc-500 font-mono focus:outline-none focus:border-amber-400 transition-colors uppercase tracking-wider"
                       />
-                      <span className="text-[11px] text-zinc-400 mt-1 block">
-                        Ingresa el código que generaste en la cuenta de Administrador para este correo.
-                      </span>
                     </div>
                   </>
+                )}
+
+                {!isAdminEmail && existingBiz && (
+                  <div>
+                    <label className="block text-xs font-bold text-zinc-300 mb-1.5 flex items-center gap-1.5">
+                      <Phone className="w-3.5 h-3.5 text-amber-400" />
+                      Número de Teléfono (WhatsApp RD)
+                    </label>
+                    <input
+                      type="tel"
+                      value={bizPhone || existingBiz.phone || ''}
+                      onChange={(e) => setBizPhone(e.target.value)}
+                      placeholder="809-555-0142"
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3.5 py-2.5 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-amber-400 transition-colors"
+                    />
+                  </div>
                 )}
 
                 <button
@@ -503,10 +582,12 @@ export const AuthPortal: React.FC<AuthPortalProps> = ({ onLoginSuccess }) => {
                   <Lock className="w-4 h-4" />
                   <span>
                     {bizLoading
-                      ? 'Validando con el servidor...'
+                      ? 'Conectando con el servidor...'
                       : isAdminEmail
-                      ? 'Acceder como Administrador'
-                      : 'Ingresar a mi Barbería'}
+                      ? 'Acceder como Administrador General'
+                      : existingBiz
+                      ? `Entrar a ${existingBiz.name}`
+                      : 'Crear Cuenta de Barbero y Entrar'}
                   </span>
                 </button>
               </form>
@@ -557,7 +638,7 @@ export const AuthPortal: React.FC<AuthPortalProps> = ({ onLoginSuccess }) => {
                     className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3.5 py-2.5 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-amber-400 transition-colors"
                   />
                   <span className="text-[11px] text-zinc-500 mt-1 block">
-                    Solo necesitas tu correo para entrar. No se requiere número de teléfono.
+                    Solo necesitas tu correo para entrar o crear tu cuenta al instante.
                   </span>
                 </div>
 
@@ -571,6 +652,23 @@ export const AuthPortal: React.FC<AuthPortalProps> = ({ onLoginSuccess }) => {
                     value={clientName}
                     onChange={(e) => setClientName(e.target.value)}
                     placeholder="Ej: Miguel Sosa (Opcional si ya estás registrado)"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3.5 py-2.5 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-amber-400 transition-colors"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-zinc-300 mb-1.5 flex items-center justify-between">
+                    <span className="flex items-center gap-1.5">
+                      <Phone className="w-3.5 h-3.5 text-amber-400" />
+                      Teléfono / WhatsApp RD
+                    </span>
+                    <span className="text-[10px] text-zinc-500 font-normal">Opcional</span>
+                  </label>
+                  <input
+                    type="tel"
+                    value={clientPhone}
+                    onChange={(e) => setClientPhone(e.target.value)}
+                    placeholder="809-555-0142"
                     className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3.5 py-2.5 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-amber-400 transition-colors"
                   />
                 </div>

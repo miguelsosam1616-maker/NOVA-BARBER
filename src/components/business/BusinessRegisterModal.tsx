@@ -66,11 +66,6 @@ export const BusinessRegisterModal: React.FC<BusinessRegisterModalProps> = ({
     const cleanOwner = ownerName.trim();
     const cleanAddress = address.trim();
 
-    if (!isSuperAdmin && !cleanCode) {
-      setErrorMsg('Debes ingresar el código de autorización proporcionado por el Administrador Nova.');
-      return;
-    }
-
     if (!cleanOwner) {
       setErrorMsg('Por favor ingresa tu nombre completo como dueño o encargado.');
       return;
@@ -151,10 +146,10 @@ export const BusinessRegisterModal: React.FC<BusinessRegisterModalProps> = ({
       expenses: [],
     };
 
-    const registration = db.registerBusinessWithAuthCode(cleanCode, businessData);
+    const registration = db.registerBusiness(businessData, cleanCode);
 
     if (!registration.success || !registration.business) {
-      setErrorMsg(registration.error || 'No se pudo registrar la barbería con este código.');
+      setErrorMsg('No se pudo registrar la barbería. Por favor revisa los datos.');
       return;
     }
 
@@ -192,28 +187,25 @@ export const BusinessRegisterModal: React.FC<BusinessRegisterModalProps> = ({
 
         <form onSubmit={handleSubmit} className="space-y-4 text-xs">
           {/* Authorization Code Input */}
-          <div className="bg-amber-500/5 border border-amber-500/20 p-3 rounded-2xl space-y-2">
-            <label className="block font-bold text-amber-300 flex items-center justify-between">
+          <div className="bg-zinc-950/60 border border-zinc-800 p-3 rounded-2xl space-y-2">
+            <label className="block font-bold text-zinc-300 flex items-center justify-between">
               <span className="flex items-center gap-1.5">
                 <KeyRound className="w-3.5 h-3.5 text-amber-400" />
-                Código de Autorización Oficial
+                Código Promocional / Autorización
               </span>
-              {isSuperAdmin && (
-                <span className="text-[10px] bg-amber-500/20 px-1.5 py-0.5 rounded text-amber-300">
-                  Admin
-                </span>
-              )}
+              <span className="text-[10px] text-zinc-500 font-normal">
+                Opcional (No requerido)
+              </span>
             </label>
             <input
               type="text"
-              required={!isSuperAdmin}
               value={authCode}
               onChange={(e) => setAuthCode(e.target.value.toUpperCase())}
-              placeholder="Ej: NOVA-AUTH-2026"
-              className="w-full bg-zinc-950 border border-amber-500/40 rounded-xl px-3 py-2 text-white font-mono text-sm tracking-wider uppercase focus:outline-none focus:border-amber-400"
+              placeholder="NOVA-AUTH (Opcional)"
+              className="w-full bg-zinc-900 border border-zinc-700 rounded-xl px-3 py-2 text-white font-mono text-sm tracking-wider uppercase focus:outline-none focus:border-amber-400"
             />
-            <p className="text-[10px] text-zinc-400">
-              Este código quedará registrado y vinculado para siempre a tu correo.
+            <p className="text-[10px] text-zinc-500">
+              Puedes crear tu cuenta directamente sin necesidad de ningún código.
             </p>
           </div>
 

@@ -936,10 +936,109 @@ app.post('/api/businesses/register', (req, res) => {
     });
 
     saveDbToDisk();
+    broadcastSse('BUSINESS_REGISTERED', { business, businesses: dbState.businesses, notifications: dbState.notifications });
     broadcastSse('SYNC', dbState);
     console.log(`[Nova DB] Business registered: ${business.name} (${cleanEmail})`);
 
     res.json({ success: true, business, businesses: dbState.businesses });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Dedicated Client Registration endpoint
+app.post('/api/clients/register', (req, res) => {
+  try {
+    const { client, email, name, phone, avatar } = req.body;
+    const clientEmail = (client?.email || email || '').trim().toLowerCase();
+    if (!clientEmail) {
+      return res.status(400).json({ success: false, error: 'Correo de cliente requerido' });
+    }
+
+    const cleanName = (client?.name || name || `Cliente ${clientEmail.split('@')[0]}`).trim();
+    const cleanPhone = (client?.phone || phone || '').trim();
+    const cleanAvatar = client?.avatar || avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=200&auto=format&fit=crop&q=80';
+
+    let targetClient = dbState.clients.find(
+      (c) => c.email && c.email.trim().toLowerCase() === clientEmail
+    );
+
+    let isNew = false;
+    if (targetClient) {
+      if (cleanName && targetClient.name !== cleanName) targetClient.name = cleanName;
+      if (cleanPhone) targetClient.phone = cleanPhone;
+      if (client?.accountStatus) targetClient.accountStatus = client.accountStatus;
+    } else {
+      isNew = true;
+      targetClient = {
+        id: client?.id || `client-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+        name: cleanName,
+        email: clientEmail,
+        phone: cleanPhone,
+        avatar: cleanAvatar,
+        savedBusinessCodes: client?.savedBusinessCodes || [],
+        totalAppointmentsBooked: client?.totalAppointmentsBooked || 0,
+        createdAt: client?.createdAt || new Date().toISOString(),
+        accountStatus: client?.accountStatus || 'activa',
+      };
+      dbState.clients.unshift(targetClient);
+
+      // Create Admin notification for new client
+      dbState.notifications.unshift({
+        id: `notif-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+        recipientRole: 'admin',
+        title: '👤 Nuevo Cliente Registrado',
+        message: `${cleanName} (${clientEmail}) se registró en Nova Barber en tiempo real.`,
+        type: 'accepted',
+        timestamp: new Date().toISOString(),
+        read: false,
+      });
+    }
+
+    saveDbToDisk();
+    broadcastSse('CLIENT_REGISTERED', {
+      client: targetClient,
+      clients: dbState.clients,
+      notifications: dbState.notifications,
+      isNew,
+    });
+    broadcastSse('SYNC', dbState);
+    console.log(`[Nova DB] Client ${isNew ? 'registered' : 'synced'}: ${cleanName} (${clientEmail})`);
+
+    res.json({ success: true, client: targetClient, clients: dbState.clients, isNew });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Dedicated Client Save endpoint
+app.post('/api/clients/save', (req, res) => {
+  try {
+    const client = req.body;
+    if (!client || !client.email) {
+      return res.status(400).json({ success: false, error: 'Datos de cliente inválidos' });
+    }
+
+    const cleanEmail = client.email.trim().toLowerCase();
+    const idx = dbState.clients.findIndex(
+      (c) => c.id === client.id || (c.email && c.email.trim().toLowerCase() === cleanEmail)
+    );
+
+    if (idx >= 0) {
+      dbState.clients[idx] = { ...dbState.clients[idx], ...client };
+    } else {
+      dbState.clients.unshift(client);
+    }
+
+    saveDbToDisk();
+    broadcastSse('CLIENT_REGISTERED', {
+      client,
+      clients: dbState.clients,
+      notifications: dbState.notifications,
+    });
+    broadcastSse('SYNC', dbState);
+
+    res.json({ success: true, client, clients: dbState.clients });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
   }
