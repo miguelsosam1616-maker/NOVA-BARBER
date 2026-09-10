@@ -7,16 +7,16 @@ import { useNovaDb } from '../lib/store';
 interface NotificationDrawerProps {
   isOpen: boolean;
   onClose: () => void;
-  role: UserRole;
-  currentId: string;
+  role?: UserRole;
+  currentId?: string;
   onSelectAppointment?: (aptId: string) => void;
 }
 
 export const NotificationDrawer: React.FC<NotificationDrawerProps> = ({
   isOpen,
   onClose,
-  role,
-  currentId,
+  role = 'client',
+  currentId = '',
   onSelectAppointment,
 }) => {
   const { db, notifications } = useNovaDb();

@@ -191,10 +191,17 @@ export const BusinessQueueManager: React.FC<BusinessQueueManagerProps> = ({ busi
       return;
     }
 
-    const closure = db.closeDay(business.id, closedByName.trim() || 'Encargado', closureNotes.trim() || undefined);
+    const res = db.closeDay(
+      business.id,
+      todayStr,
+      closedByName.trim() || 'Encargado',
+      closureNotes.trim() || undefined
+    );
     setClosureModalOpen(false);
     setClosureNotes('');
-    setViewingClosure(closure); // Show the printed summary immediately!
+    if (res.success && res.closure) {
+      setViewingClosure(res.closure); // Show the printed summary immediately!
+    }
 
     confetti({
       particleCount: 80,

@@ -19,7 +19,7 @@ import { useNovaDb } from '../../lib/store';
 import { ADMIN_EMAIL, isSuperAdminEmail } from '../../data/seedData';
 import { BusinessRegisterModal } from '../business/BusinessRegisterModal';
 import { AccountBlockedModal } from '../common/AccountBlockedModal';
-import { Business, BusinessAccountStatus } from '../../types';
+import { Business, BusinessAccountStatus, ClientProfile } from '../../types';
 
 interface AuthPortalProps {
   onLoginSuccess: () => void;
@@ -50,6 +50,8 @@ export const AuthPortal: React.FC<AuthPortalProps> = ({ onLoginSuccess }) => {
   const [clientName, setClientName] = useState('');
   const [clientEmail, setClientEmail] = useState('');
   const [clientError, setClientError] = useState('');
+  const [bizLoading, setBizLoading] = useState(false);
+  const [clientLoading, setClientLoading] = useState(false);
   const [blockedClientData, setBlockedClientData] = useState<{
     clientName: string;
     clientEmail: string;
@@ -61,9 +63,10 @@ export const AuthPortal: React.FC<AuthPortalProps> = ({ onLoginSuccess }) => {
   const isAdminEmail = isSuperAdminEmail(bizEmail);
 
   // Handle Business / Admin Login
-  const handleBusinessAuth = (e: React.FormEvent) => {
+  const handleBusinessAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     setBizError('');
+    setBizLoading(true);
 
     const cleanEmail = bizEmail.trim().toLowerCase();
     const cleanPhone = bizPhone.trim();
@@ -71,6 +74,7 @@ export const AuthPortal: React.FC<AuthPortalProps> = ({ onLoginSuccess }) => {
 
     if (!cleanEmail || !cleanEmail.includes('@')) {
       setBizError('Por favor introduce un correo electrónico válido.');
+      setBizLoading(false);
       return;
     }
 
@@ -86,6 +90,7 @@ export const AuthPortal: React.FC<AuthPortalProps> = ({ onLoginSuccess }) => {
         businessId: adminBiz?.id,
         authCode: cleanCode || 'NOVA-SUPER-ADMIN',
       });
+      setBizLoading(false);
       onLoginSuccess();
       return;
     }
@@ -93,19 +98,25 @@ export const AuthPortal: React.FC<AuthPortalProps> = ({ onLoginSuccess }) => {
     // 2. NORMAL BARBER / BUSINESS OWNER CHECK
     if (!cleanCode) {
       setBizError('Debes ingresar el código de autorización generado en la cuenta de Administrador.');
+      setBizLoading(false);
       return;
     }
 
-    // Validate the authorization code with flexible matching
-    const validation = db.validateAuthCodeForEmail(cleanCode, cleanEmail);
+    // Validate the authorization code online with server (supports cross-browser sync)
+    const validation = await db.validateAuthCodeOnline(cleanCode, cleanEmail);
     if (!validation.valid) {
       setBizError(validation.error || 'Código de autorización no válido.');
+      setBizLoading(false);
       return;
     }
 
     const validCodeObj = validation.codeObj;
     const officialCode = validCodeObj?.code || cleanCode;
     const finalPhone = cleanPhone && cleanPhone.length >= 7 ? cleanPhone : '809-555-0000';
+
+    if (validCodeObj) {
+      db.saveAuthCode(validCodeObj);
+    }
 
     // Check if a business is already registered with this email
     let existingBiz = db.getBusinessByOwnerEmail(cleanEmail);
@@ -116,9 +127,9 @@ export const AuthPortal: React.FC<AuthPortalProps> = ({ onLoginSuccess }) => {
         validCodeObj?.note?.trim() ||
         `Barbería ${cleanEmail.split('@')[0].replace(/[^a-zA-Z0-9]/g, ' ').toUpperCase()}`;
 
-      const registration = db.registerBusinessWithAuthCode(officialCode, {
+      const newBizData = {
         name: defaultName,
-        type: 'barberia',
+        type: 'barberia' as const,
         ownerName: defaultName,
         ownerEmail: cleanEmail,
         phone: finalPhone,
@@ -139,7 +150,7 @@ export const AuthPortal: React.FC<AuthPortalProps> = ({ onLoginSuccess }) => {
             description: 'Servicio estándar con cerquillo milimétrico y peinado final.',
             price: 500,
             duration: 30,
-            category: 'cortes',
+            category: 'cortes' as const,
             active: true,
           },
           {
@@ -148,7 +159,7 @@ export const AuthPortal: React.FC<AuthPortalProps> = ({ onLoginSuccess }) => {
             description: 'Combo completo para el máximo cuidado.',
             price: 800,
             duration: 45,
-            category: 'combos',
+            category: 'combos' as const,
             active: true,
           },
         ],
@@ -168,16 +179,36 @@ export const AuthPortal: React.FC<AuthPortalProps> = ({ onLoginSuccess }) => {
           },
         ],
         expenses: [],
-      });
+      };
 
+      const registration = db.registerBusinessWithAuthCode(officialCode, newBizData);
       if (registration.success && registration.business) {
         existingBiz = registration.business;
+      }
+
+      // Also register on server backend
+      try {
+        await fetch('/api/businesses/register', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            business: existingBiz || {
+              ...newBizData,
+              id: `biz-${Date.now()}`,
+              code: 'NV-RD-01',
+              authCodeUsed: officialCode,
+              accountStatus: 'activa',
+              createdAt: new Date().toISOString(),
+            },
+            authCode: officialCode,
+          }),
+        });
+      } catch (err) {
+        console.warn('Backend business registration error:', err);
       }
     }
 
     if (existingBiz) {
-      // If the account was previously marked as vencida or suspended,
-      // entering with a valid authorization code successfully reactivates it to ACTIVA!
       if (existingBiz.accountStatus === 'vencida' || existingBiz.accountStatus === 'suspendida') {
         existingBiz.accountStatus = 'activa';
         existingBiz.statusReason = undefined;
@@ -185,7 +216,6 @@ export const AuthPortal: React.FC<AuthPortalProps> = ({ onLoginSuccess }) => {
         db.saveBusiness(existingBiz);
       }
 
-      // Active! Log in directly without any blockage
       db.setCurrentUser({
         id: `user-${Date.now()}`,
         email: cleanEmail,
@@ -197,22 +227,26 @@ export const AuthPortal: React.FC<AuthPortalProps> = ({ onLoginSuccess }) => {
         accountStatus: 'activa',
         statusReason: undefined,
       });
+      setBizLoading(false);
       onLoginSuccess();
     } else {
       setBizError('Ocurrió un inconveniente al activar la barbería. Por favor intenta de nuevo.');
+      setBizLoading(false);
     }
   };
 
   // Handle Client Login / Register
-  const handleClientAuth = (e: React.FormEvent) => {
+  const handleClientAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     setClientError('');
+    setClientLoading(true);
 
     const cleanEmail = clientEmail.trim().toLowerCase();
     const cleanName = clientName.trim();
 
     if (!cleanEmail || !cleanEmail.includes('@') || !cleanEmail.includes('.')) {
       setClientError('Por favor introduce un correo electrónico válido (ejemplo: usuario@gmail.com).');
+      setClientLoading(false);
       return;
     }
 
@@ -228,63 +262,64 @@ export const AuthPortal: React.FC<AuthPortalProps> = ({ onLoginSuccess }) => {
         businessId: adminBiz?.id,
         authCode: 'NOVA-SUPER-ADMIN',
       });
+      setClientLoading(false);
       onLoginSuccess();
       return;
     }
 
-    // Check if client account already exists (Single unique account per email to avoid multicuentas)
     const existing = db.getClientByEmail(cleanEmail);
-    if (existing) {
-      // Check if suspended or expired
-      if (existing.accountStatus === 'suspendida' || existing.accountStatus === 'vencida') {
-        setBlockedClientData({
-          clientName: existing.name,
-          clientEmail: existing.email,
-          accountStatus: existing.accountStatus,
-          statusReason: existing.statusReason,
-          statusUpdatedAt: existing.statusUpdatedAt,
-        });
-        return;
-      }
+    const finalName = cleanName || (existing ? existing.name : `Cliente ${cleanEmail.split('@')[0]}`);
 
-      // Log directly into this existing account without duplicating
-      db.saveClient(existing);
-      db.setCurrentUser({
-        id: existing.id,
-        clientId: existing.id,
-        email: existing.email,
-        name: existing.name,
-        role: 'client',
-        accountStatus: existing.accountStatus || 'activa',
-      });
-      onLoginSuccess();
-      return;
-    }
-
-    // Brand new client: register 1 unique account tied to this email
-    const finalName = cleanName || `Cliente ${cleanEmail.split('@')[0]}`;
-    const result = db.registerOrLoginClient(cleanEmail, finalName);
-
+    // Call server to ensure real-time persistence and immediate admin broadcast
+    let serverClient: ClientProfile | null = null;
     try {
-      fetch('/api/clients/register', {
+      const regResp = await fetch('/api/clients/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           email: cleanEmail,
           name: finalName,
-          avatar: result.client.avatar,
+          avatar: existing?.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=200&auto=format&fit=crop&q=80',
         }),
-      }).catch(() => {});
-    } catch {}
+      });
+      if (regResp.ok) {
+        const regData = await regResp.json();
+        if (regData.success && regData.client) {
+          serverClient = regData.client;
+          if (Array.isArray(regData.clients)) {
+            db.setClients(regData.clients);
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('Server registration error:', err);
+    }
 
+    const clientRecord: ClientProfile =
+      serverClient || existing || db.registerOrLoginClient(cleanEmail, finalName).client;
+
+    if (clientRecord.accountStatus === 'suspendida' || clientRecord.accountStatus === 'vencida') {
+      setBlockedClientData({
+        clientName: clientRecord.name,
+        clientEmail: clientRecord.email,
+        accountStatus: clientRecord.accountStatus,
+        statusReason: clientRecord.statusReason,
+        statusUpdatedAt: clientRecord.statusUpdatedAt,
+      });
+      setClientLoading(false);
+      return;
+    }
+
+    db.saveClient(clientRecord);
     db.setCurrentUser({
-      id: result.client.id,
-      clientId: result.client.id,
-      email: cleanEmail,
-      name: result.client.name,
+      id: clientRecord.id,
+      clientId: clientRecord.id,
+      email: clientRecord.email,
+      name: clientRecord.name,
       role: 'client',
-      accountStatus: 'activa',
+      accountStatus: clientRecord.accountStatus || 'activa',
     });
+    setClientLoading(false);
     onLoginSuccess();
   };
 
@@ -462,11 +497,16 @@ export const AuthPortal: React.FC<AuthPortalProps> = ({ onLoginSuccess }) => {
 
                 <button
                   type="submit"
-                  className="w-full py-3 bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 text-zinc-950 font-black text-sm rounded-xl shadow-lg shadow-amber-500/20 transition-all flex items-center justify-center gap-2 cursor-pointer mt-2"
+                  disabled={bizLoading}
+                  className="w-full py-3 bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 disabled:opacity-50 text-zinc-950 font-black text-sm rounded-xl shadow-lg shadow-amber-500/20 transition-all flex items-center justify-center gap-2 cursor-pointer mt-2"
                 >
                   <Lock className="w-4 h-4" />
                   <span>
-                    {isAdminEmail ? 'Acceder como Administrador' : 'Ingresar a mi Barbería'}
+                    {bizLoading
+                      ? 'Validando con el servidor...'
+                      : isAdminEmail
+                      ? 'Acceder como Administrador'
+                      : 'Ingresar a mi Barbería'}
                   </span>
                 </button>
               </form>
@@ -545,10 +585,11 @@ export const AuthPortal: React.FC<AuthPortalProps> = ({ onLoginSuccess }) => {
 
                 <button
                   type="submit"
-                  className="w-full py-3 bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 text-zinc-950 font-black text-sm rounded-xl shadow-lg shadow-amber-500/20 transition-all flex items-center justify-center gap-2 cursor-pointer mt-2"
+                  disabled={clientLoading}
+                  className="w-full py-3 bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 disabled:opacity-50 text-zinc-950 font-black text-sm rounded-xl shadow-lg shadow-amber-500/20 transition-all flex items-center justify-center gap-2 cursor-pointer mt-2"
                 >
                   <ArrowRight className="w-4 h-4" />
-                  <span>Entrar a mi Cuenta de Cliente</span>
+                  <span>{clientLoading ? 'Conectando en tiempo real...' : 'Entrar a Nova Barber'}</span>
                 </button>
               </form>
 

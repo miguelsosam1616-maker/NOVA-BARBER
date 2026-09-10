@@ -193,34 +193,36 @@ function syncFromServerPayload(data: any): boolean {
   if (Array.isArray(clients)) {
     const localClients = getStored<ClientProfile[]>(STORAGE_KEYS.CLIENTS, []);
     const clientMap = new Map<string, ClientProfile>();
+    // Key by ID only to prevent duplicate entries
     clients.forEach((c: ClientProfile) => {
-      clientMap.set(c.id, c);
-      if (c.email) clientMap.set(c.email.toLowerCase(), c);
+      if (c && c.id) {
+        clientMap.set(c.id, c);
+      }
     });
     localClients.forEach((c: ClientProfile) => {
-      const key = c.email ? c.email.toLowerCase() : c.id;
-      if (!clientMap.has(key) && !clientMap.has(c.id)) {
+      if (!c || !c.id) return;
+      const cleanEmail = c.email ? c.email.trim().toLowerCase() : '';
+      let existingId: string | null = null;
+      for (const [id, srvClient] of clientMap.entries()) {
+        if (id === c.id || (cleanEmail && srvClient.email && srvClient.email.trim().toLowerCase() === cleanEmail)) {
+          existingId = id;
+          break;
+        }
+      }
+      if (!existingId) {
         clientMap.set(c.id, c);
       } else {
-        const existing = clientMap.get(key) || clientMap.get(c.id)!;
+        const existing = clientMap.get(existingId)!;
         if (
           c.statusUpdatedAt &&
           existing.statusUpdatedAt &&
           new Date(c.statusUpdatedAt) > new Date(existing.statusUpdatedAt)
         ) {
-          clientMap.set(existing.id, c);
+          clientMap.set(existingId, { ...existing, ...c });
         }
       }
     });
-    const uniqueClients: ClientProfile[] = [];
-    const seen = new Set<string>();
-    clientMap.forEach((val) => {
-      if (!seen.has(val.id)) {
-        seen.add(val.id);
-        uniqueClients.push(val);
-      }
-    });
-    const mergedClients = uniqueClients.sort(
+    const mergedClients = Array.from(clientMap.values()).sort(
       (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
     );
     if (JSON.stringify(localClients) !== JSON.stringify(mergedClients)) {
@@ -342,7 +344,32 @@ function initRealtimeStream() {
           setStored(STORAGE_KEYS.NOTIFICATIONS, payload.notifications);
         }
         const curr = getStored<CurrentUser | null>(STORAGE_KEYS.CURRENT_USER, null);
-        if (curr && curr.role === 'admin') {
+        if (curr && (curr.role === 'admin' || isSuperAdminEmail(curr.email))) {
+          soundManager.playSuccessAlert();
+        }
+        lastSyncTimestamp = new Date().toISOString();
+        notifyListeners();
+      } catch {}
+    });
+
+    eventSource.addEventListener('BUSINESS_REGISTERED', (e: MessageEvent) => {
+      try {
+        const payload = JSON.parse(e.data);
+        if (payload.business) {
+          const businesses = getStored<Business[]>(STORAGE_KEYS.BUSINESSES, []);
+          const idx = businesses.findIndex((b) => b.id === payload.business.id);
+          if (idx >= 0) {
+            businesses[idx] = payload.business;
+          } else {
+            businesses.unshift(payload.business);
+          }
+          setStored(STORAGE_KEYS.BUSINESSES, businesses);
+        }
+        if (Array.isArray(payload.notifications)) {
+          setStored(STORAGE_KEYS.NOTIFICATIONS, payload.notifications);
+        }
+        const curr = getStored<CurrentUser | null>(STORAGE_KEYS.CURRENT_USER, null);
+        if (curr && (curr.role === 'admin' || isSuperAdminEmail(curr.email))) {
           soundManager.playSuccessAlert();
         }
         lastSyncTimestamp = new Date().toISOString();
@@ -693,6 +720,58 @@ export const db = {
     }
   },
 
+  saveAuthCode(codeObj: AuthCode): void {
+    const codes = this.getAuthCodes();
+    const idx = codes.findIndex(
+      (c) =>
+        c.id === codeObj.id ||
+        c.code.trim().toUpperCase() === codeObj.code.trim().toUpperCase()
+    );
+    if (idx >= 0) {
+      codes[idx] = { ...codes[idx], ...codeObj };
+    } else {
+      codes.unshift(codeObj);
+    }
+    setStored(STORAGE_KEYS.AUTH_CODES, codes);
+    this.broadcast({ type: 'DATA_CHANGED' });
+    notifyListeners();
+  },
+
+  async validateAuthCodeOnline(
+    codeStr: string,
+    email: string
+  ): Promise<{ valid: boolean; error?: string; codeObj?: AuthCode }> {
+    const cleanRawCode = (codeStr || '').trim().toUpperCase();
+    const cleanEmail = (email || '').trim().toLowerCase();
+
+    if (isSuperAdminEmail(cleanEmail)) {
+      return { valid: true };
+    }
+
+    if (!cleanRawCode) {
+      return { valid: false, error: 'Por favor introduce el código de autorización.' };
+    }
+
+    try {
+      const resp = await fetch('/api/auth-codes/validate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: cleanRawCode, email: cleanEmail }),
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        if (data.valid && data.codeObj) {
+          this.saveAuthCode(data.codeObj);
+        }
+        return data;
+      }
+    } catch {
+      // offline fallback
+    }
+
+    return this.validateAuthCodeForEmail(cleanRawCode, cleanEmail);
+  },
+
   // Verify authorization code for barber registration/login
   validateAuthCodeForEmail(
     codeStr: string,
@@ -1040,6 +1119,12 @@ export const db = {
         body: JSON.stringify(client),
       }).catch(() => {});
     } catch {}
+  },
+
+  setClients(clients: ClientProfile[]): void {
+    setStored(STORAGE_KEYS.CLIENTS, clients);
+    this.broadcast({ type: 'DATA_CHANGED' });
+    notifyListeners();
   },
 
   registerOrLoginClient(email: string, name?: string): { client: ClientProfile; isNew: boolean } {
@@ -1571,13 +1656,16 @@ export const db = {
     const items: DailyClosureItem[] = [];
 
     todayQueue.forEach((q) => {
+      const amount = q.paidAmount ?? q.servicePrice;
       items.push({
         id: q.id,
         type: 'walk_in',
+        origin: 'walk_in',
         clientName: q.clientName,
         serviceName: q.serviceName,
         barberName: q.barberName,
-        amountPaid: q.paidAmount ?? q.servicePrice,
+        amountPaid: amount,
+        paidAmount: amount,
         time: q.completedAt || q.arrivalTime,
         paymentMethod: q.paymentMethod || 'efectivo',
       });
@@ -1587,10 +1675,12 @@ export const db = {
       items.push({
         id: a.id,
         type: 'appointment',
+        origin: 'appointment',
         clientName: a.clientName,
         serviceName: a.serviceName,
         barberName: a.barberName,
         amountPaid: a.servicePrice,
+        paidAmount: a.servicePrice,
         time: a.time,
         paymentMethod: 'efectivo',
       });
@@ -1607,6 +1697,7 @@ export const db = {
       totalWalkIns,
       totalAppointments,
       totalClients,
+      totalCustomers: totalClients,
       totalRevenue,
     };
   },
@@ -1621,18 +1712,22 @@ export const db = {
     if (!biz) return { success: false, error: 'Negocio no encontrado' };
 
     const summary = this.getTodaySalesSummary(businessId, dateStr);
+    const nowIso = new Date().toISOString();
 
     const newClosure: DailyClosure = {
       id: `closure-${Date.now()}`,
       businessId,
       businessName: biz.name,
       date: dateStr,
-      closedAt: new Date().toISOString(),
+      closedAt: nowIso,
+      createdAt: nowIso,
       closedBy,
+      closedByName: closedBy,
       items: summary.items,
       totalWalkIns: summary.totalWalkIns,
       totalAppointments: summary.totalAppointments,
       totalClients: summary.totalClients,
+      totalCustomers: summary.totalClients,
       totalRevenue: summary.totalRevenue,
       notes,
     };

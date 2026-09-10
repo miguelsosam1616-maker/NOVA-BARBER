@@ -5,16 +5,16 @@ import { AppNotification } from '../types';
 import { useNovaDb } from '../lib/store';
 
 interface RealtimeToastProps {
-  currentRole: 'client' | 'business';
-  currentId: string;
-  onOpenNotifications: () => void;
+  currentRole?: 'client' | 'business' | 'admin';
+  currentId?: string;
+  onOpenNotifications?: () => void;
   onOpenAppointment?: (aptId: string) => void;
 }
 
 export const RealtimeToast: React.FC<RealtimeToastProps> = ({
-  currentRole,
-  currentId,
-  onOpenNotifications,
+  currentRole = 'client',
+  currentId = '',
+  onOpenNotifications = () => {},
   onOpenAppointment,
 }) => {
   const { notifications } = useNovaDb();

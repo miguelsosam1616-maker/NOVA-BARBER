@@ -425,6 +425,7 @@ export const BarbershopProfileView: React.FC<BarbershopProfileViewProps> = ({
       {/* QR Code and Poster Modal */}
       {qrModalOpen && (
         <QRCodeCardModal
+          isOpen={qrModalOpen}
           business={currentBiz}
           onClose={() => setQrModalOpen(false)}
         />

@@ -148,11 +148,13 @@ export interface QueueEntry {
 
 export interface DailyClosureItem {
   id: string;
-  type: 'walk_in' | 'appointment';
+  type?: 'walk_in' | 'appointment';
+  origin?: 'walk_in' | 'appointment' | 'cita' | 'turno' | 'queue';
   clientName: string;
   serviceName: string;
   barberName: string;
   amountPaid: number;
+  paidAmount?: number;
   time: string;
   paymentMethod?: string;
 }
@@ -163,11 +165,14 @@ export interface DailyClosure {
   businessName: string;
   date: string; // YYYY-MM-DD
   closedAt: string; // ISO string
+  createdAt?: string;
   closedBy: string;
+  closedByName?: string;
   items: DailyClosureItem[];
   totalWalkIns: number;
   totalAppointments: number;
   totalClients: number;
+  totalCustomers?: number;
   totalRevenue: number; // RD$
   notes?: string;
 }

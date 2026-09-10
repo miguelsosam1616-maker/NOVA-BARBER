@@ -241,7 +241,7 @@ export const ManualAppointmentModal: React.FC<ManualAppointmentModalProps> = ({
             >
               {business.barbers.map((b) => (
                 <option key={b.id} value={b.id}>
-                  {b.name} {b.nickname ? `(${b.nickname})` : ''} — {b.specialty}
+                  {b.name} {b.nickname ? `(${b.nickname})` : ''} — {b.specialties?.join(', ') || 'Barbero'}
                 </option>
               ))}
             </select>

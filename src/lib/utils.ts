@@ -1,8 +1,18 @@
 import { AppointmentStatus } from '../types';
 
 // Format currency as Dominican Pesos (RD$)
-export function formatRD(amount: number): string {
-  return `RD$ ${Number(amount || 0).toLocaleString('es-DO')}`;
+export function formatRD(amount?: number | string | null): string {
+  try {
+    const num = Number(amount || 0);
+    const valid = isNaN(num) ? 0 : num;
+    try {
+      return `RD$ ${valid.toLocaleString('es-DO')}`;
+    } catch {
+      return `RD$ ${valid.toLocaleString()}`;
+    }
+  } catch {
+    return `RD$ ${amount || 0}`;
+  }
 }
 
 // Format phone number to (809) 555-1234 (null-safe)
@@ -38,36 +48,56 @@ export function getWhatsAppLink(phone?: string | null, message: string = ''): st
 }
 
 // Format date into Spanish friendly: "Viernes 4 de Septiembre, 2026"
-export function formatDominicanDate(dateStr: string, includeDayOfWeek: boolean = true): string {
-  if (!dateStr) return '';
-  const [year, month, day] = dateStr.split('-').map(Number);
-  const date = new Date(year, month - 1, day);
-
-  const days = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
-  const months = [
-    'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
-    'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'
-  ];
-
-  const dayName = days[date.getDay()];
-  const monthName = months[date.getMonth()];
-
-  if (includeDayOfWeek) {
-    return `${dayName}, ${day} de ${monthName}`;
+export function formatDominicanDate(dateStr?: string | null, includeDayOfWeek: boolean = true): string {
+  if (!dateStr || typeof dateStr !== 'string') return '';
+  try {
+    const cleanDateStr = dateStr.includes('T') ? dateStr.split('T')[0] : dateStr;
+    const parts = cleanDateStr.split('-');
+    if (parts.length >= 3) {
+      const year = parseInt(parts[0], 10);
+      const month = parseInt(parts[1], 10) - 1;
+      const day = parseInt(parts[2], 10);
+      const date = new Date(year, month, day);
+      if (!isNaN(date.getTime())) {
+        const days = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
+        const months = [
+          'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
+          'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'
+        ];
+        const dayName = days[date.getDay()] || '';
+        const monthName = months[date.getMonth()] || '';
+        if (includeDayOfWeek) {
+          return `${dayName}, ${day} de ${monthName}`;
+        }
+        return `${day} de ${monthName}, ${year}`;
+      }
+    }
+    const d = new Date(dateStr);
+    if (!isNaN(d.getTime())) {
+      return d.toLocaleDateString('es-DO', { dateStyle: 'medium' });
+    }
+    return dateStr;
+  } catch {
+    return dateStr || '';
   }
-  return `${day} de ${monthName}, ${year}`;
 }
 
 // Time formatter (e.g. "15:00" -> "3:00 PM")
-export function formatTime12h(time24: string): string {
-  if (!time24) return '';
-  const [hStr, mStr] = time24.split(':');
-  let h = parseInt(hStr, 10);
-  const m = mStr || '00';
-  const ampm = h >= 12 ? 'PM' : 'AM';
-  h = h % 12;
-  h = h ? h : 12; // 0 => 12
-  return `${h}:${m} ${ampm}`;
+export function formatTime12h(time24?: string | null): string {
+  if (!time24 || typeof time24 !== 'string') return '';
+  try {
+    const parts = time24.split(':');
+    if (parts.length === 0) return time24;
+    let h = parseInt(parts[0], 10);
+    if (isNaN(h)) return time24;
+    const m = parts[1] ? parts[1].slice(0, 2) : '00';
+    const ampm = h >= 12 ? 'PM' : 'AM';
+    h = h % 12;
+    h = h ? h : 12; // 0 => 12
+    return `${h}:${m} ${ampm}`;
+  } catch {
+    return time24 || '';
+  }
 }
 
 // Status helpers

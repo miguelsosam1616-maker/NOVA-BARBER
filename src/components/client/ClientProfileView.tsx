@@ -14,18 +14,20 @@ import {
 } from 'lucide-react';
 import { useNovaDb } from '../../lib/store';
 import { formatRD, formatDominicanDate, formatDominicanPhone, formatTime12h, getStatusBadgeInfo } from '../../lib/utils';
+import { ClientProfile } from '../../types';
 
 export const ClientProfileView: React.FC = () => {
   const { db, client, currentUser, appointments } = useNovaDb();
 
   // Resolve effective client profile from client object or currentUser
-  const effectiveClient = client || {
+  const effectiveClient: ClientProfile = client || {
     id: currentUser?.id || 'client-temp',
     name: currentUser?.name || 'Cliente Nova',
     email: currentUser?.email || '',
     phone: currentUser?.phone || '',
     avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=200&auto=format&fit=crop&q=80',
     savedBusinessCodes: [],
+    createdAt: new Date().toISOString(),
     accountStatus: currentUser?.accountStatus || 'activa',
   };
 
