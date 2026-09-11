@@ -31,6 +31,7 @@ import {
   formatDominicanDate,
   formatTime12h,
 } from '../../lib/utils';
+import { TimeWheelInput } from '../common/TimeWheelPicker';
 
 interface BusinessQueueManagerProps {
   business: Business;
@@ -398,15 +399,11 @@ export const BusinessQueueManager: React.FC<BusinessQueueManagerProps> = ({ busi
 
                 <div className="grid grid-cols-2 gap-2">
                   <div>
-                    <label className="block text-xs font-bold text-zinc-300 mb-1 flex items-center gap-1">
-                      <Clock className="w-3.5 h-3.5 text-emerald-400" />
-                      Hora de Llegada
-                    </label>
-                    <input
-                      type="time"
+                    <TimeWheelInput
+                      label="Hora de Llegada"
                       value={arrivalTime}
-                      onChange={(e) => setArrivalTime(e.target.value)}
-                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-hidden focus:border-amber-400"
+                      onChange={(val) => setArrivalTime(val)}
+                      stepMinutes={15}
                     />
                   </div>
                   <div>

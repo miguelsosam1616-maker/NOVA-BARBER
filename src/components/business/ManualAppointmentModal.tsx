@@ -2,7 +2,8 @@ import React, { useState, useMemo } from 'react';
 import { X, Calendar, Clock, User, Phone, Scissors, Check, AlertCircle } from 'lucide-react';
 import { Business, Service, Barber } from '../../types';
 import { useNovaDb } from '../../lib/store';
-import { formatRD, generateTimeSlots, formatDominicanDate } from '../../lib/utils';
+import { formatRD, generateTimeSlots, formatDominicanDate, formatTime12h } from '../../lib/utils';
+import { TimeWheelPicker } from '../common/TimeWheelPicker';
 
 interface ManualAppointmentModalProps {
   business: Business;
@@ -247,47 +248,49 @@ export const ManualAppointmentModal: React.FC<ManualAppointmentModalProps> = ({
             </select>
           </div>
 
-          {/* Date & Time */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-bold text-zinc-300 mb-1.5 flex items-center gap-1.5">
-                <Calendar className="w-3.5 h-3.5 text-emerald-400" />
-                Fecha *
-              </label>
-              <input
-                type="date"
-                required
-                value={date}
-                min={todayStr}
-                onChange={(e) => setDate(e.target.value)}
-                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs sm:text-sm text-white focus:outline-hidden focus:border-amber-400"
-              />
-            </div>
+          {/* Date Selector */}
+          <div>
+            <label className="block text-xs font-bold text-zinc-300 mb-1.5 flex items-center gap-1.5">
+              <Calendar className="w-3.5 h-3.5 text-emerald-400" />
+              Fecha de la Cita *
+            </label>
+            <input
+              type="date"
+              required
+              value={date}
+              min={todayStr}
+              onChange={(e) => setDate(e.target.value)}
+              className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2.5 text-xs sm:text-sm text-white focus:outline-hidden focus:border-amber-400"
+            />
+          </div>
 
-            <div>
-              <label className="block text-xs font-bold text-zinc-300 mb-1.5 flex items-center gap-1.5">
+          {/* Rolling Alarm TimeWheelPicker (AM/PM tipo alarma rodante) */}
+          <div>
+            <label className="block text-xs font-bold text-zinc-300 mb-1.5 flex items-center justify-between">
+              <span className="flex items-center gap-1.5">
                 <Clock className="w-3.5 h-3.5 text-amber-400" />
-                Hora *
-              </label>
-              <select
-                value={time}
-                onChange={(e) => setTime(e.target.value)}
-                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs sm:text-sm text-white focus:outline-hidden focus:border-amber-400"
-              >
-                {timeSlots.map((slot) => (
-                  <option key={slot} value={slot}>
-                    {slot}
-                  </option>
-                ))}
-              </select>
-            </div>
+                Hora de la Cita (AM / PM tipo alarma rodante) *
+              </span>
+              <span className="text-amber-400 font-mono text-xs font-bold bg-amber-500/10 px-2.5 py-0.5 rounded-lg border border-amber-500/20">
+                {formatTime12h(time)}
+              </span>
+            </label>
+            <TimeWheelPicker
+              value={time}
+              onChange={(newTime24) => setTime(newTime24)}
+              minTime={selectedBarber?.workHours?.start || business.openingHour || '08:00'}
+              maxTime={selectedBarber?.workHours?.end || business.closingHour || '20:00'}
+              barberName={selectedBarber?.name || business.name}
+              stepMinutes={15}
+              title="Rueda la hora como en la alarma del celular"
+            />
           </div>
 
           {isConflict && (
             <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs flex items-center gap-2">
               <AlertCircle className="w-4 h-4 shrink-0" />
               <span>
-                ¡Atención! Ya existe una cita agendada para {selectedBarber?.name} a las {time}.
+                ¡Atención! Ya existe una cita agendada para {selectedBarber?.name} a las {formatTime12h(time)}.
               </span>
             </div>
           )}

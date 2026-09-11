@@ -3,6 +3,7 @@ import { X, Calendar, Clock, Send, AlertCircle, RefreshCw, User, Scissors } from
 import { Appointment, Business } from '../../types';
 import { useNovaDb } from '../../lib/store';
 import { formatRD, formatDominicanDate, formatTime12h, generateTimeSlots } from '../../lib/utils';
+import { TimeWheelPicker } from '../common/TimeWheelPicker';
 
 interface RescheduleAppointmentModalProps {
   business: Business;
@@ -161,40 +162,42 @@ export const RescheduleAppointmentModal: React.FC<RescheduleAppointmentModalProp
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
-          {/* New Proposed Date & Time */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-bold text-zinc-300 mb-1.5 flex items-center gap-1.5">
-                <Calendar className="w-3.5 h-3.5 text-cyan-400" />
-                Nueva Fecha Propuesta *
-              </label>
-              <input
-                type="date"
-                required
-                min={todayStr}
-                value={proposedDate}
-                onChange={(e) => setProposedDate(e.target.value)}
-                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs sm:text-sm text-white focus:outline-hidden focus:border-cyan-400"
-              />
-            </div>
+          {/* New Proposed Date */}
+          <div>
+            <label className="block text-xs font-bold text-zinc-300 mb-1.5 flex items-center gap-1.5">
+              <Calendar className="w-3.5 h-3.5 text-cyan-400" />
+              Nueva Fecha Propuesta *
+            </label>
+            <input
+              type="date"
+              required
+              min={todayStr}
+              value={proposedDate}
+              onChange={(e) => setProposedDate(e.target.value)}
+              className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2.5 text-xs sm:text-sm text-white focus:outline-hidden focus:border-cyan-400"
+            />
+          </div>
 
-            <div>
-              <label className="block text-xs font-bold text-zinc-300 mb-1.5 flex items-center gap-1.5">
+          {/* New Proposed Time - Alarm Wheel Picker */}
+          <div>
+            <label className="block text-xs font-bold text-zinc-300 mb-1.5 flex items-center justify-between">
+              <span className="flex items-center gap-1.5">
                 <Clock className="w-3.5 h-3.5 text-cyan-400" />
-                Nueva Hora Disponible *
-              </label>
-              <select
-                value={proposedTime}
-                onChange={(e) => setProposedTime(e.target.value)}
-                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs sm:text-sm text-white focus:outline-hidden focus:border-cyan-400"
-              >
-                {timeSlots.map((slot) => (
-                  <option key={slot} value={slot}>
-                    {formatTime12h(slot)} ({slot})
-                  </option>
-                ))}
-              </select>
-            </div>
+                Nueva Hora Disponible (AM / PM tipo alarma rodante) *
+              </span>
+              <span className="text-cyan-300 font-mono text-xs font-bold bg-cyan-500/10 px-2.5 py-0.5 rounded-lg border border-cyan-500/20">
+                {formatTime12h(proposedTime)}
+              </span>
+            </label>
+            <TimeWheelPicker
+              value={proposedTime}
+              onChange={(newTime24) => setProposedTime(newTime24)}
+              minTime={business.openingHour || '08:00'}
+              maxTime={business.closingHour || '20:00'}
+              barberName={appointment?.barberName || business.name}
+              stepMinutes={15}
+              title="Rueda la nueva hora propuesta"
+            />
           </div>
 
           {/* Reason / Note to Client */}

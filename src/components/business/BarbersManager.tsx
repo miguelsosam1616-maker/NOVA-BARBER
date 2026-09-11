@@ -19,6 +19,7 @@ import {
 import { Business, Barber } from '../../types';
 import { useNovaDb } from '../../lib/store';
 import { formatRD, formatDominicanPhone, formatDominicanDate, formatTime12h } from '../../lib/utils';
+import { TimeWheelInput } from '../common/TimeWheelPicker';
 
 interface BarbersManagerProps {
   business: Business;
@@ -448,21 +449,17 @@ export const BarbersManager: React.FC<BarbersManagerProps> = ({ business }) => {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-semibold text-zinc-400 mb-1">Hora Inicio</label>
-                  <input
-                    type="time"
+                  <TimeWheelInput
+                    label="Hora Inicio"
                     value={workStart}
-                    onChange={(e) => setWorkStart(e.target.value)}
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-sm text-white focus:outline-hidden focus:border-amber-400"
+                    onChange={(val) => setWorkStart(val)}
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-zinc-400 mb-1">Hora Fin</label>
-                  <input
-                    type="time"
+                  <TimeWheelInput
+                    label="Hora Fin"
                     value={workEnd}
-                    onChange={(e) => setWorkEnd(e.target.value)}
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-sm text-white focus:outline-hidden focus:border-amber-400"
+                    onChange={(val) => setWorkEnd(val)}
                   />
                 </div>
               </div>

@@ -25,6 +25,7 @@ import {
   getWhatsAppLink,
 } from '../../lib/utils';
 import { QRCodeCardModal } from './QRCodeCardModal';
+import { TimeWheelInput } from '../common/TimeWheelPicker';
 
 interface BarbershopProfileViewProps {
   business: Business;
@@ -331,26 +332,18 @@ export const BarbershopProfileView: React.FC<BarbershopProfileViewProps> = ({
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-zinc-300 mb-1">
-                    Hora Apertura
-                  </label>
-                  <input
-                    type="time"
+                  <TimeWheelInput
+                    label="Hora Apertura"
                     value={openingHour}
-                    onChange={(e) => setOpeningHour(e.target.value)}
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-amber-500"
+                    onChange={(val) => setOpeningHour(val)}
                   />
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-zinc-300 mb-1">
-                    Hora Cierre
-                  </label>
-                  <input
-                    type="time"
+                  <TimeWheelInput
+                    label="Hora Cierre"
                     value={closingHour}
-                    onChange={(e) => setClosingHour(e.target.value)}
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-amber-500"
+                    onChange={(val) => setClosingHour(val)}
                   />
                 </div>
 

@@ -18,6 +18,7 @@ import { Business } from '../../types';
 import { useNovaDb } from '../../lib/store';
 import { generateUniqueBusinessCode } from '../../lib/utils';
 import { ADMIN_EMAIL, isSuperAdminEmail } from '../../data/seedData';
+import { TimeWheelInput } from '../common/TimeWheelPicker';
 
 interface BusinessRegisterModalProps {
   isOpen: boolean;
@@ -330,27 +331,17 @@ export const BusinessRegisterModal: React.FC<BusinessRegisterModalProps> = ({
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block font-bold text-zinc-300 mb-1 flex items-center gap-1">
-                <Clock className="w-3.5 h-3.5 text-amber-400" />
-                Apertura
-              </label>
-              <input
-                type="time"
+              <TimeWheelInput
+                label="Apertura"
                 value={openingHour}
-                onChange={(e) => setOpeningHour(e.target.value)}
-                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-amber-400"
+                onChange={(val) => setOpeningHour(val)}
               />
             </div>
             <div>
-              <label className="block font-bold text-zinc-300 mb-1 flex items-center gap-1">
-                <Clock className="w-3.5 h-3.5 text-amber-400" />
-                Cierre
-              </label>
-              <input
-                type="time"
+              <TimeWheelInput
+                label="Cierre"
                 value={closingHour}
-                onChange={(e) => setClosingHour(e.target.value)}
-                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-amber-400"
+                onChange={(val) => setClosingHour(val)}
               />
             </div>
           </div>
