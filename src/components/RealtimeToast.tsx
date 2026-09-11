@@ -21,27 +21,26 @@ export const RealtimeToast: React.FC<RealtimeToastProps> = ({
   const [activeToast, setActiveToast] = useState<AppNotification | null>(null);
   const [lastSeenId, setLastSeenId] = useState<string>('');
 
+  // Find the latest unread notification for the current active role & id
+  const relevant = notifications.filter(
+    (n) => n.recipientRole === currentRole && (n.recipientId === currentId || !n.recipientId) && !n.read
+  );
+  const latestNotification = relevant.length > 0 ? relevant[0] : null;
+  const latestId = latestNotification?.id || '';
+
   useEffect(() => {
-    // Find the latest unread notification for the current active role & id
-    const relevant = notifications.filter(
-      (n) => n.recipientRole === currentRole && (n.recipientId === currentId || !n.recipientId) && !n.read
-    );
+    if (latestId && latestId !== lastSeenId && latestNotification) {
+      setLastSeenId(latestId);
+      setActiveToast(latestNotification);
 
-    if (relevant.length > 0) {
-      const latest = relevant[0];
-      if (latest.id !== lastSeenId) {
-        setLastSeenId(latest.id);
-        setActiveToast(latest);
+      // Auto dismiss after 6 seconds
+      const timer = setTimeout(() => {
+        setActiveToast((prev) => (prev?.id === latestId ? null : prev));
+      }, 6000);
 
-        // Auto dismiss after 6 seconds
-        const timer = setTimeout(() => {
-          setActiveToast((prev) => (prev?.id === latest.id ? null : prev));
-        }, 6000);
-
-        return () => clearTimeout(timer);
-      }
+      return () => clearTimeout(timer);
     }
-  }, [notifications, currentRole, currentId, lastSeenId]);
+  }, [latestId, lastSeenId, latestNotification]);
 
   if (!activeToast) return null;
 

@@ -834,7 +834,7 @@ app.post('/api/auth-codes/validate', (req, res) => {
     const cleanEmail = (email || '').trim().toLowerCase();
 
     // Check super admin bypass
-    if (cleanEmail === 'miguelsosam1616@gmail.com' || cleanEmail === 'financieranova0@gmail.com') {
+    if (cleanEmail === 'financieranova0@gmail.com') {
       return res.json({ valid: true });
     }
 
@@ -868,7 +868,7 @@ app.post('/api/auth-codes/validate', (req, res) => {
       });
     }
 
-    const isAssignedToAdmin = found.assignedEmail && (found.assignedEmail.toLowerCase() === 'miguelsosam1616@gmail.com' || found.assignedEmail.toLowerCase() === 'financieranova0@gmail.com');
+    const isAssignedToAdmin = found.assignedEmail && found.assignedEmail.toLowerCase() === 'financieranova0@gmail.com';
     if (found.assignedEmail && !isAssignedToAdmin && found.assignedEmail.toLowerCase() !== cleanEmail) {
       return res.json({
         valid: false,
@@ -876,7 +876,7 @@ app.post('/api/auth-codes/validate', (req, res) => {
       });
     }
 
-    const isClaimedByAdmin = found.claimedByEmail && (found.claimedByEmail.toLowerCase() === 'miguelsosam1616@gmail.com' || found.claimedByEmail.toLowerCase() === 'financieranova0@gmail.com');
+    const isClaimedByAdmin = found.claimedByEmail && found.claimedByEmail.toLowerCase() === 'financieranova0@gmail.com';
     if (found.claimedByEmail && !isClaimedByAdmin && found.claimedByEmail.toLowerCase() !== cleanEmail) {
       return res.json({
         valid: false,

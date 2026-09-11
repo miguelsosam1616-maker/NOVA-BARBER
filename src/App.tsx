@@ -78,7 +78,7 @@ export default function App() {
     );
   }
 
-  const isSuperAdmin = isSuperAdminEmail(currentUser.email) || currentUser.role === 'admin';
+  const isSuperAdmin = isSuperAdminEmail(currentUser.email);
   const isClient = currentUser.role === 'client';
 
   // Determine active business for business view

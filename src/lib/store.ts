@@ -1875,6 +1875,18 @@ export function useNovaDb() {
     return db.getNotifications().filter((n) => n.recipientRole === role && n.recipientId === id);
   }, []);
 
+  const syncWithServer = useCallback(() => db.syncWithServer(), []);
+  const updateBusinessAccountStatus = useCallback(
+    (...args: Parameters<typeof db.updateBusinessAccountStatus>) => db.updateBusinessAccountStatus(...args),
+    []
+  );
+  const deleteBusiness = useCallback((...args: Parameters<typeof db.deleteBusiness>) => db.deleteBusiness(...args), []);
+  const updateClientAccountStatus = useCallback(
+    (...args: Parameters<typeof db.updateClientAccountStatus>) => db.updateClientAccountStatus(...args),
+    []
+  );
+  const deleteClient = useCallback((...args: Parameters<typeof db.deleteClient>) => db.deleteClient(...args), []);
+
   return {
     db,
     currentUser,
@@ -1888,11 +1900,11 @@ export function useNovaDb() {
     authCodes: db.getAuthCodes(),
     queue: db.getQueue(),
     dailyClosures: db.getDailyClosures(),
-    updateBusinessAccountStatus: db.updateBusinessAccountStatus.bind(db),
-    deleteBusiness: db.deleteBusiness.bind(db),
-    updateClientAccountStatus: db.updateClientAccountStatus.bind(db),
-    deleteClient: db.deleteClient.bind(db),
-    syncWithServer: db.syncWithServer.bind(db),
+    updateBusinessAccountStatus,
+    deleteBusiness,
+    updateClientAccountStatus,
+    deleteClient,
+    syncWithServer,
     getAppointmentsForClient,
     getAppointmentsForBusiness,
     getQueueForBusiness,

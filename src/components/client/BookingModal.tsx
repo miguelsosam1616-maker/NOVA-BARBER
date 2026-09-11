@@ -74,11 +74,12 @@ export const BookingModal: React.FC<BookingModalProps> = ({
   const [confirmedApt, setConfirmedApt] = useState<Appointment | null>(null);
 
   // Sync selected service when preselectedService changes
+  const preselectedServiceId = preselectedService?.id;
   React.useEffect(() => {
-    if (preselectedService) {
-      setSelectedServiceId(preselectedService.id);
+    if (preselectedServiceId) {
+      setSelectedServiceId(preselectedServiceId);
     }
-  }, [preselectedService]);
+  }, [preselectedServiceId]);
 
   const selectedService = business.services.find((s) => s.id === selectedServiceId) || business.services[0];
   const activeBarbers = business.barbers.filter((b) => b.active);

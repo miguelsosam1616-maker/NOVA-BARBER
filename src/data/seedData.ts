@@ -3,7 +3,6 @@ import { Business, ClientProfile, Appointment, AppNotification, AuthCode, QueueE
 export const ADMIN_EMAIL = 'financieranova0@gmail.com';
 export const ADMIN_EMAILS = [
   'financieranova0@gmail.com',
-  'miguelsosam1616@gmail.com',
 ];
 
 export const isSuperAdminEmail = (email?: string | null): boolean => {

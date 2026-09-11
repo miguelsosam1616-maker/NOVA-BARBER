@@ -56,20 +56,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onSelectBusiness }) => {
   const [aptSearchQuery, setAptSearchQuery] = useState('');
   const [isManualSyncing, setIsManualSyncing] = useState(false);
 
-  // Local codes state to ensure instant reactive reflection upon generation/deletion
-  const [localCodes, setLocalCodes] = useState<AuthCode[]>(authCodes);
-  useEffect(() => {
-    setLocalCodes(authCodes);
-  }, [authCodes]);
-
   // Guaranteed real-time polling backup in addition to SSE
   useEffect(() => {
     syncWithServer();
     const interval = setInterval(() => {
       syncWithServer();
-    }, 3500);
+    }, 10000);
     return () => clearInterval(interval);
-  }, [syncWithServer]);
+  }, []); // Run once on mount
 
   // Generator inputs
   const [newNote, setNewNote] = useState('');
@@ -111,8 +105,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onSelectBusiness }) => {
   const handleGenerateCode = (e: React.FormEvent) => {
     e.preventDefault();
     const created = db.generateAuthCode(newNote, newAssignedEmail);
-    // Instant local state update for zero-latency feedback
-    setLocalCodes((prev) => [created, ...prev.filter((c) => c.id !== created.id)]);
     setGeneratedSuccessCode(created.code);
     setGeneratedSuccessEmail(created.assignedEmail || null);
     setNewNote('');
@@ -124,12 +116,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onSelectBusiness }) => {
 
   const handleRevokeCode = (codeId: string) => {
     db.revokeAuthCode(codeId);
-    setLocalCodes((prev) => prev.map((c) => (c.id === codeId ? { ...c, status: 'revoked' as const } : c)));
   };
 
   const handleDeleteCode = (codeId: string) => {
     db.deleteAuthCode(codeId);
-    setLocalCodes((prev) => prev.filter((c) => c.id !== codeId));
   };
 
   const handleCopy = (codeText: string) => {
@@ -216,7 +206,7 @@ Ingresa a la aplicación y colócalo junto a tu correo y teléfono para activar 
     setDeletingClientId(null);
   };
 
-  const filteredCodes = localCodes.filter((c) => {
+  const filteredCodes = authCodes.filter((c) => {
     if (statusFilter !== 'all' && c.status !== statusFilter) return false;
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
@@ -231,8 +221,8 @@ Ingresa a la aplicación y colócalo junto a tu correo y teléfono para activar 
     return true;
   });
 
-  const availableCount = localCodes.filter((c) => c.status === 'available').length;
-  const claimedCount = localCodes.filter((c) => c.status === 'claimed').length;
+  const availableCount = authCodes.filter((c) => c.status === 'available').length;
+  const claimedCount = authCodes.filter((c) => c.status === 'claimed').length;
 
   // Business stats
   const activeBizCount = businesses.filter((b) => (b.accountStatus || 'activa') === 'activa').length;
@@ -1107,7 +1097,7 @@ Ingresa a la aplicación y colócalo junto a tu correo y teléfono para activar 
                 <Users className="w-5 h-5 text-amber-400" />
                 <span>Historial de Códigos Generados</span>
                 <span className="text-xs bg-amber-400/20 text-amber-300 font-mono px-2 py-0.5 rounded-full font-bold">
-                  {localCodes.length}
+                  {authCodes.length}
                 </span>
               </h2>
               <p className="text-xs text-zinc-400">
