@@ -23,6 +23,7 @@ import { useNovaDb } from '../../lib/store';
 import {
   formatDominicanPhone,
   getWhatsAppLink,
+  formatTime12h,
 } from '../../lib/utils';
 import { QRCodeCardModal } from './QRCodeCardModal';
 import { TimeWheelInput } from '../common/TimeWheelPicker';
@@ -225,7 +226,7 @@ export const BarbershopProfileView: React.FC<BarbershopProfileViewProps> = ({
                   Horas:
                 </span>
                 <span className="font-bold text-zinc-200">
-                  {currentBiz.openingHour} - {currentBiz.closingHour}
+                  {formatTime12h(currentBiz.openingHour || '08:00')} - {formatTime12h(currentBiz.closingHour || '20:00')}
                 </span>
               </div>
 

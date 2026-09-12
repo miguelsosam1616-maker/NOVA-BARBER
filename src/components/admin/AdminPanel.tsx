@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   ShieldCheck,
   KeyRound,
@@ -43,6 +43,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onSelectBusiness }) => {
     updateClientAccountStatus,
     deleteClient,
     appointments,
+    registrationActivities,
     isRealtimeConnected,
     lastSyncTimestamp,
     syncWithServer,
@@ -206,20 +207,22 @@ Ingresa a la aplicación y colócalo junto a tu correo y teléfono para activar 
     setDeletingClientId(null);
   };
 
-  const filteredCodes = authCodes.filter((c) => {
-    if (statusFilter !== 'all' && c.status !== statusFilter) return false;
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
-      return (
-        c.code.toLowerCase().includes(q) ||
-        (c.assignedEmail && c.assignedEmail.toLowerCase().includes(q)) ||
-        (c.claimedByEmail && c.claimedByEmail.toLowerCase().includes(q)) ||
-        (c.claimedBusinessName && c.claimedBusinessName.toLowerCase().includes(q)) ||
-        (c.note && c.note.toLowerCase().includes(q))
-      );
-    }
-    return true;
-  });
+  const filteredCodes = useMemo(() => {
+    return authCodes.filter((c) => {
+      if (statusFilter !== 'all' && c.status !== statusFilter) return false;
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase();
+        return (
+          c.code.toLowerCase().includes(q) ||
+          (c.assignedEmail && c.assignedEmail.toLowerCase().includes(q)) ||
+          (c.claimedByEmail && c.claimedByEmail.toLowerCase().includes(q)) ||
+          (c.claimedBusinessName && c.claimedBusinessName.toLowerCase().includes(q)) ||
+          (c.note && c.note.toLowerCase().includes(q))
+        );
+      }
+      return true;
+    });
+  }, [authCodes, statusFilter, searchQuery]);
 
   const availableCount = authCodes.filter((c) => c.status === 'available').length;
   const claimedCount = authCodes.filter((c) => c.status === 'claimed').length;
@@ -229,41 +232,68 @@ Ingresa a la aplicación y colócalo junto a tu correo y teléfono para activar 
   const suspendedBizCount = businesses.filter((b) => b.accountStatus === 'suspendida').length;
   const expiredBizCount = businesses.filter((b) => b.accountStatus === 'vencida').length;
 
-  const filteredBusinesses = businesses.filter((b) => {
-    const status = b.accountStatus || 'activa';
-    if (bizStatusFilter !== 'all' && status !== bizStatusFilter) return false;
-    if (bizSearchQuery.trim()) {
-      const q = bizSearchQuery.toLowerCase();
-      return (
-        b.name.toLowerCase().includes(q) ||
-        b.ownerName.toLowerCase().includes(q) ||
-        b.ownerEmail.toLowerCase().includes(q) ||
-        b.phone.toLowerCase().includes(q) ||
-        b.code.toLowerCase().includes(q) ||
-        b.city.toLowerCase().includes(q)
-      );
-    }
-    return true;
-  });
+  const filteredBusinesses = useMemo(() => {
+    return businesses
+      .filter((b) => {
+        const status = b.accountStatus || 'activa';
+        if (bizStatusFilter !== 'all' && status !== bizStatusFilter) return false;
+        if (bizSearchQuery.trim()) {
+          const q = bizSearchQuery.toLowerCase();
+          const matchesBarbers = b.barbers?.some(
+            (barb) =>
+              barb.name.toLowerCase().includes(q) ||
+              (barb.nickname && barb.nickname.toLowerCase().includes(q)) ||
+              (barb.phone && barb.phone.toLowerCase().includes(q))
+          );
+          const matchesAliases =
+            Array.isArray((b as any).aliases) &&
+            (b as any).aliases.some((al: string) => al.toLowerCase().includes(q));
+          return (
+            b.name.toLowerCase().includes(q) ||
+            b.ownerName?.toLowerCase().includes(q) ||
+            b.ownerEmail?.toLowerCase().includes(q) ||
+            b.phone?.toLowerCase().includes(q) ||
+            b.code?.toLowerCase().includes(q) ||
+            b.city?.toLowerCase().includes(q) ||
+            matchesBarbers ||
+            matchesAliases
+          );
+        }
+        return true;
+      })
+      .sort((a, b) => {
+        const tA = new Date(a.createdAt || 0).getTime();
+        const tB = new Date(b.createdAt || 0).getTime();
+        return tB - tA;
+      });
+  }, [businesses, bizStatusFilter, bizSearchQuery]);
 
   // Client stats
   const activeClientsCount = clients.filter((c) => (c.accountStatus || 'activa') === 'activa').length;
   const suspendedClientsCount = clients.filter((c) => c.accountStatus === 'suspendida').length;
   const expiredClientsCount = clients.filter((c) => c.accountStatus === 'vencida').length;
 
-  const filteredClients = clients.filter((c) => {
-    const status = c.accountStatus || 'activa';
-    if (clientStatusFilter !== 'all' && status !== clientStatusFilter) return false;
-    if (clientSearchQuery.trim()) {
-      const q = clientSearchQuery.toLowerCase();
-      return (
-        c.name.toLowerCase().includes(q) ||
-        c.email.toLowerCase().includes(q) ||
-        (c.phone && c.phone.toLowerCase().includes(q))
-      );
-    }
-    return true;
-  });
+  const filteredClients = useMemo(() => {
+    return clients
+      .filter((c) => {
+        const status = c.accountStatus || 'activa';
+        if (clientStatusFilter !== 'all' && status !== clientStatusFilter) return false;
+        if (clientSearchQuery.trim()) {
+          const q = clientSearchQuery.toLowerCase();
+          return (
+            c.name.toLowerCase().includes(q) ||
+            c.email.toLowerCase().includes(q) ||
+            (c.phone && c.phone.toLowerCase().includes(q))
+          );
+        }
+        return true;
+      })
+      .sort((a, b) => {
+        const tA = new Date(a.createdAt || 0).getTime();
+        const tB = new Date(b.createdAt || 0).getTime();
+        return tB - tA;
+      });
+  }, [clients, clientStatusFilter, clientSearchQuery]);
 
   // Appointment stats and filtering
   const pendingAppointmentsCount = appointments.filter((a) => a.status === 'pendiente').length;
@@ -272,23 +302,25 @@ Ingresa a la aplicación y colócalo junto a tu correo y teléfono para activar 
   const rejectedAppointmentsCount = appointments.filter((a) => a.status === 'rechazada').length;
   const cancelledAppointmentsCount = appointments.filter((a) => a.status === 'cancelada').length;
 
-  const filteredAppointments = appointments.filter((apt) => {
-    if (aptStatusFilter !== 'all' && apt.status !== aptStatusFilter) return false;
-    if (aptSearchQuery.trim()) {
-      const q = aptSearchQuery.toLowerCase();
-      return (
-        apt.clientName?.toLowerCase().includes(q) ||
-        apt.clientEmail?.toLowerCase().includes(q) ||
-        apt.clientPhone?.includes(q) ||
-        apt.businessName?.toLowerCase().includes(q) ||
-        apt.businessCode?.toLowerCase().includes(q) ||
-        apt.serviceName?.toLowerCase().includes(q) ||
-        apt.barberName?.toLowerCase().includes(q) ||
-        apt.date?.includes(q)
-      );
-    }
-    return true;
-  });
+  const filteredAppointments = useMemo(() => {
+    return appointments.filter((apt) => {
+      if (aptStatusFilter !== 'all' && apt.status !== aptStatusFilter) return false;
+      if (aptSearchQuery.trim()) {
+        const q = aptSearchQuery.toLowerCase();
+        return (
+          apt.clientName?.toLowerCase().includes(q) ||
+          apt.clientEmail?.toLowerCase().includes(q) ||
+          apt.clientPhone?.includes(q) ||
+          apt.businessName?.toLowerCase().includes(q) ||
+          apt.businessCode?.toLowerCase().includes(q) ||
+          apt.serviceName?.toLowerCase().includes(q) ||
+          apt.barberName?.toLowerCase().includes(q) ||
+          apt.date?.includes(q)
+        );
+      }
+      return true;
+    });
+  }, [appointments, aptStatusFilter, aptSearchQuery]);
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6 animate-in fade-in duration-300">
@@ -511,6 +543,49 @@ Ingresa a la aplicación y colócalo junto a tu correo y teléfono para activar 
           </div>
         </div>
 
+        {/* Real-time Registrations Activity Alert */}
+        {registrationActivities && registrationActivities.length > 0 && (
+          <div className="bg-amber-500/10 border border-amber-500/30 rounded-2xl p-4 space-y-2.5">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="relative flex h-2.5 w-2.5">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+                </span>
+                <span className="text-xs font-black text-amber-400 uppercase tracking-wider flex items-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5" />
+                  Nuevos Registros en Vivo (Barberos & Clientes)
+                </span>
+              </div>
+              <span className="text-[10px] text-zinc-400 font-mono">
+                {registrationActivities.length} registro{registrationActivities.length > 1 ? 's' : ''} en tiempo real
+              </span>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+              {registrationActivities.slice(0, 3).map((act) => (
+                <div key={act.id} className="bg-zinc-950/90 border border-zinc-800 hover:border-amber-500/50 rounded-xl p-2.5 text-xs flex items-center justify-between gap-2 shadow-sm">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-1.5 font-bold text-white truncate">
+                      {act.type === 'business' ? (
+                        <Building2 className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                      ) : (
+                        <Users className="w-3.5 h-3.5 text-blue-400 shrink-0" />
+                      )}
+                      <span className="truncate">{act.name}</span>
+                    </div>
+                    <div className="text-[11px] text-zinc-400 truncate">
+                      {act.phone} • {act.email}
+                    </div>
+                  </div>
+                  <span className="text-[10px] font-mono font-bold bg-amber-500/20 text-amber-400 px-2 py-0.5 rounded shrink-0">
+                    {act.code || 'REGISTRADO'}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Search Filter */}
         <div className="relative">
           <Search className="w-4 h-4 text-zinc-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
@@ -561,9 +636,21 @@ Ingresa a la aplicación y colócalo junto a tu correo y teléfono para activar 
                   {/* Card Header & Status Badge */}
                   <div className="flex items-start justify-between gap-2">
                     <div>
-                      <span className="font-mono text-[11px] font-black text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">
-                        {biz.code}
-                      </span>
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className="font-mono text-[11px] font-black text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">
+                          {biz.code}
+                        </span>
+                        {Array.isArray((biz as any).aliases) &&
+                          (biz as any).aliases.map((al: string) => (
+                            <span
+                              key={al}
+                              className="font-mono text-[10px] font-bold text-zinc-400 bg-zinc-800 px-1.5 py-0.5 rounded border border-zinc-700"
+                              title="Código adicional / anterior"
+                            >
+                              {al}
+                            </span>
+                          ))}
+                      </div>
                       <h3 className="text-base font-black text-white mt-1.5">{biz.name}</h3>
                       <span className="text-[10px] text-zinc-400 uppercase font-semibold">
                         {biz.type} • {biz.city}

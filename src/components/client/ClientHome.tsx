@@ -34,25 +34,34 @@ export const ClientHome: React.FC<ClientHomeProps> = ({ onSelectBusiness, initia
     }
   }, [initialCode]);
 
-  const handleSearchCode = (codeToSearch: string) => {
+  const handleSearchCode = async (codeToSearch: string) => {
     setErrorMsg('');
     const clean = codeToSearch.trim();
     if (!clean) {
-      setErrorMsg('Por favor introduce un código de barbería (ej. NOVA-BRB-48291)');
+      setErrorMsg('Por favor introduce un código de barbería (ej. NOVA-BRB-24932 o número del barbero)');
       return;
     }
 
     setIsSearching(true);
-    setTimeout(() => {
-      const biz = db.getBusinessByCode(clean);
+    try {
+      // 1. Check local store with smart matcher (handles aliases, suffixes like 24932, phone numbers, names)
+      let biz = db.getBusinessByCode(clean);
+      if (!biz) {
+        // 2. Search on server endpoint
+        biz = await db.findBusinessByCodeAsync(clean);
+      }
+
       setIsSearching(false);
       if (biz) {
         db.saveBusinessCodeToClient(biz.code);
         onSelectBusiness(biz);
       } else {
-        setErrorMsg(`No encontramos ningún negocio registrado con el código "${clean}". Revisa que esté bien escrito.`);
+        setErrorMsg(`No encontramos ningún negocio registrado con el código "${clean}". Revisa que esté bien escrito o busca por nombre de la barbería.`);
       }
-    }, 200);
+    } catch {
+      setIsSearching(false);
+      setErrorMsg('Ocurrió un error al buscar. Inténtalo de nuevo.');
+    }
   };
 
   const handleFormSubmit = (e: React.FormEvent) => {

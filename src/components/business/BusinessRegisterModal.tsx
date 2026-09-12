@@ -57,7 +57,7 @@ export const BusinessRegisterModal: React.FC<BusinessRegisterModalProps> = ({
 
   const isSuperAdmin = isSuperAdminEmail(ownerEmail);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
 
@@ -147,7 +147,7 @@ export const BusinessRegisterModal: React.FC<BusinessRegisterModalProps> = ({
       expenses: [],
     };
 
-    const registration = db.registerBusiness(businessData, cleanCode);
+    const registration = await db.registerBusinessAsync(businessData, cleanCode);
 
     if (!registration.success || !registration.business) {
       setErrorMsg('No se pudo registrar la barbería. Por favor revisa los datos.');

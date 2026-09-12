@@ -82,7 +82,7 @@ export const BookingModal: React.FC<BookingModalProps> = ({
   }, [preselectedServiceId]);
 
   const selectedService = business.services.find((s) => s.id === selectedServiceId) || business.services[0];
-  const activeBarbers = business.barbers.filter((b) => b.active);
+  const activeBarbers = useMemo(() => (business.barbers || []).filter((b) => b.active), [business.barbers]);
 
   // Barber chosen or fallback to business schedule
   const chosenBarber = useMemo(() => {

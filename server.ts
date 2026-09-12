@@ -310,14 +310,18 @@ app.post('/api/sync', (req, res) => {
 // Direct client registration / login with instant server persistence and SSE broadcast
 app.post('/api/clients/register', (req, res) => {
   try {
-    const { email, name, phone, avatar } = req.body;
-    if (!email) {
+    const { client, email, name, phone, avatar } = req.body;
+    const clientEmail = (client?.email || email || '').trim().toLowerCase();
+    if (!clientEmail) {
       return res.status(400).json({ success: false, error: 'Email requerido' });
     }
 
-    const cleanEmail = email.trim().toLowerCase();
+    const cleanName = (client?.name || name || `Cliente ${clientEmail.split('@')[0]}`).trim();
+    const cleanPhone = (client?.phone || phone || '').trim();
+    const cleanAvatar = client?.avatar || avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=200&auto=format&fit=crop&q=80';
+
     const existing = dbState.clients.find(
-      (c) => c.email && c.email.trim().toLowerCase() === cleanEmail
+      (c) => c.email && c.email.trim().toLowerCase() === clientEmail
     );
 
     let clientRecord = existing;
@@ -325,24 +329,24 @@ app.post('/api/clients/register', (req, res) => {
 
     if (existing) {
       // Update info if provided
-      if (name && name.trim()) existing.name = name.trim();
-      if (phone && phone.trim()) existing.phone = phone.trim();
-      if (avatar) existing.avatar = avatar;
+      if (cleanName) existing.name = cleanName;
+      if (cleanPhone) existing.phone = cleanPhone;
+      if (cleanAvatar) existing.avatar = cleanAvatar;
+      if (client?.accountStatus) existing.accountStatus = client.accountStatus;
       existing.lastLoginAt = new Date().toISOString();
       clientRecord = existing;
     } else {
       isNew = true;
-      const cleanName = name && name.trim() ? name.trim() : `Cliente ${cleanEmail.split('@')[0]}`;
       clientRecord = {
-        id: `client-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+        id: client?.id || `client-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
         name: cleanName,
-        email: cleanEmail,
-        phone: phone?.trim() || undefined,
-        avatar: avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=200&auto=format&fit=crop&q=80',
-        savedBusinessCodes: [],
-        createdAt: new Date().toISOString(),
+        email: clientEmail,
+        phone: cleanPhone || undefined,
+        avatar: cleanAvatar,
+        savedBusinessCodes: client?.savedBusinessCodes || [],
+        createdAt: client?.createdAt || new Date().toISOString(),
         lastLoginAt: new Date().toISOString(),
-        accountStatus: 'activa',
+        accountStatus: client?.accountStatus || 'activa',
       };
       dbState.clients.unshift(clientRecord);
 
@@ -356,6 +360,19 @@ app.post('/api/clients/register', (req, res) => {
         timestamp: new Date().toISOString(),
         read: false,
       });
+
+      // Record live registration activity
+      const clientActivity: RegistrationActivityItem = {
+        id: `act-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+        type: 'client',
+        name: cleanName,
+        email: clientEmail,
+        phone: cleanPhone,
+        timestamp: new Date().toISOString(),
+      };
+      recentActivities.unshift(clientActivity);
+      if (recentActivities.length > 50) recentActivities.pop();
+      broadcastSse('REGISTRATION_ACTIVITY', clientActivity);
 
       console.log(`[Nova DB] New client registered: ${clientRecord.email} (${clientRecord.name})`);
     }
@@ -890,26 +907,140 @@ app.post('/api/auth-codes/validate', (req, res) => {
   }
 });
 
+// Recent registration activities memory store
+interface RegistrationActivityItem {
+  id: string;
+  type: 'business' | 'barber' | 'client';
+  name: string;
+  ownerName?: string;
+  email: string;
+  phone?: string;
+  code?: string;
+  businessName?: string;
+  timestamp: string;
+}
+const recentActivities: RegistrationActivityItem[] = [];
+
+// Endpoint to get recent registrations for Admin Live Ticker
+app.get('/api/activity/registrations', (req, res) => {
+  res.json({ success: true, activities: recentActivities.slice(0, 30) });
+});
+
+// Endpoint to search and find businesses/barbers by code, name, phone, email, or suffix
+app.get('/api/businesses/find', (req, res) => {
+  try {
+    const q = ((req.query.q || req.query.code || req.query.term || '') as string).trim();
+    if (!q) {
+      return res.json({ success: true, matches: [], business: null });
+    }
+
+    const clean = q.toUpperCase();
+    const cleanAlpha = clean.replace(/[^A-Z0-9]/g, '');
+    const cleanDigits = clean.replace(/[^0-9]/g, '');
+
+    const matches = dbState.businesses.filter((b) => {
+      // 1. Exact code or alias
+      if (b.code && b.code.toUpperCase() === clean) return true;
+      if (Array.isArray((b as any).aliases) && (b as any).aliases.some((a: string) => a.toUpperCase() === clean)) return true;
+
+      // 2. Alphanumeric code (ignores hyphens, hash, spaces)
+      const bAlpha = (b.code || '').replace(/[^A-Z0-9]/g, '').toUpperCase();
+      if (bAlpha && bAlpha === cleanAlpha) return true;
+
+      // 3. Numeric suffix (e.g. "24932" or "#24932")
+      if (cleanDigits.length >= 4) {
+        const bDigits = (b.code || '').replace(/[^0-9]/g, '');
+        if (bDigits.endsWith(cleanDigits) || bDigits === cleanDigits) return true;
+      }
+
+      // 4. Phone number match
+      if (cleanDigits.length >= 7) {
+        const bPhone = (b.phone || '').replace(/[^0-9]/g, '');
+        if (bPhone.includes(cleanDigits)) return true;
+        if (b.barbers?.some((barb) => (barb.phone || '').replace(/[^0-9]/g, '').includes(cleanDigits))) return true;
+      }
+
+      // 5. Name, Barber Name, Nickname or Owner Email
+      if (b.name && b.name.toUpperCase().includes(clean)) return true;
+      if (b.ownerName && b.ownerName.toUpperCase().includes(clean)) return true;
+      if (b.ownerEmail && b.ownerEmail.toLowerCase() === clean.toLowerCase()) return true;
+      if (b.barbers?.some((barb) => 
+        barb.name.toUpperCase().includes(clean) || 
+        (barb.nickname && barb.nickname.toUpperCase().includes(clean))
+      )) return true;
+
+      return false;
+    });
+
+    const bestMatch = matches[0] || null;
+    res.json({ success: true, business: bestMatch, matches });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.get('/api/businesses/code/:code', (req, res) => {
+  const code = (req.params.code || '').trim().toUpperCase();
+  const cleanAlpha = code.replace(/[^A-Z0-9]/g, '');
+  const cleanDigits = code.replace(/[^0-9]/g, '');
+
+  const match = dbState.businesses.find((b) => {
+    if (b.code && b.code.toUpperCase() === code) return true;
+    if (Array.isArray((b as any).aliases) && (b as any).aliases.some((a: string) => a.toUpperCase() === code)) return true;
+    const bAlpha = (b.code || '').replace(/[^A-Z0-9]/g, '').toUpperCase();
+    if (bAlpha && bAlpha === cleanAlpha) return true;
+    if (cleanDigits.length >= 4) {
+      const bDigits = (b.code || '').replace(/[^0-9]/g, '');
+      if (bDigits.endsWith(cleanDigits) || bDigits === cleanDigits) return true;
+    }
+    return false;
+  });
+
+  if (match) {
+    res.json({ success: true, business: match });
+  } else {
+    res.status(404).json({ success: false, error: `Código "${code}" no encontrado` });
+  }
+});
+
 // Dedicated Business Registration endpoint
 app.post('/api/businesses/register', (req, res) => {
   try {
     const { business, authCode } = req.body;
-    if (!business || !business.ownerEmail) {
+    if (!business) {
       return res.status(400).json({ success: false, error: 'Datos de barbería incompletos' });
     }
 
-    const cleanEmail = business.ownerEmail.trim().toLowerCase();
-    const existingIdx = dbState.businesses.findIndex(
-      (b) => b.id === business.id || (b.ownerEmail && b.ownerEmail.trim().toLowerCase() === cleanEmail)
-    );
+    const cleanEmail = (business.ownerEmail || '').trim().toLowerCase();
+    const cleanPhone = (business.phone || '').trim();
+    const cleanName = (business.name || 'Barbería').trim();
 
-    if (existingIdx >= 0) {
-      dbState.businesses[existingIdx] = { ...dbState.businesses[existingIdx], ...business };
-    } else {
-      dbState.businesses.unshift(business);
+    // Ensure business code is set
+    if (!business.code || typeof business.code !== 'string') {
+      const randomNum = Math.floor(10000 + Math.random() * 90000);
+      business.code = `NOVA-BRB-${randomNum}`;
     }
 
-    // Mark auth code as claimed
+    // Ensure accountStatus is active
+    if (!business.accountStatus) {
+      business.accountStatus = 'activa';
+    }
+
+    // Check if updating existing by ID or Code
+    const existingIdx = dbState.businesses.findIndex(
+      (b) => b.id === business.id || (b.code && b.code.toUpperCase() === business.code.toUpperCase())
+    );
+
+    let savedBiz: any;
+    if (existingIdx >= 0) {
+      dbState.businesses[existingIdx] = { ...dbState.businesses[existingIdx], ...business };
+      savedBiz = dbState.businesses[existingIdx];
+    } else {
+      dbState.businesses.unshift(business);
+      savedBiz = business;
+    }
+
+    // Mark auth code as claimed if applicable
     if (authCode) {
       const cleanCode = authCode.trim().toUpperCase();
       const codeObj = dbState.authCodes.find(
@@ -917,128 +1048,46 @@ app.post('/api/businesses/register', (req, res) => {
       );
       if (codeObj) {
         codeObj.status = 'claimed';
-        codeObj.claimedByEmail = cleanEmail;
-        codeObj.claimedBusinessId = business.id;
-        codeObj.claimedBusinessName = business.name;
+        codeObj.claimedByEmail = cleanEmail || undefined;
+        codeObj.claimedBusinessId = savedBiz.id;
+        codeObj.claimedBusinessName = savedBiz.name;
         codeObj.claimedAt = new Date().toISOString();
       }
     }
 
     // Create Admin notification
-    dbState.notifications.unshift({
+    const newNotif = {
       id: `notif-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
       recipientRole: 'admin',
-      title: '💈 Nueva Barbería Registrada',
-      message: `${business.name} (${cleanEmail}) se registró con el código ${authCode || 'N/A'}.`,
-      type: 'accepted',
+      title: '💈 Nuevo Barbero / Negocio Registrado',
+      message: `${cleanName} (${cleanEmail || cleanPhone}) se registró con el código ${savedBiz.code}.`,
+      type: 'accepted' as const,
       timestamp: new Date().toISOString(),
       read: false,
-    });
+    };
+    dbState.notifications.unshift(newNotif);
+
+    // Record activity
+    const activity: RegistrationActivityItem = {
+      id: `act-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      type: 'business',
+      name: cleanName,
+      ownerName: savedBiz.ownerName || cleanName,
+      email: cleanEmail,
+      phone: cleanPhone,
+      code: savedBiz.code,
+      timestamp: new Date().toISOString(),
+    };
+    recentActivities.unshift(activity);
+    if (recentActivities.length > 50) recentActivities.pop();
 
     saveDbToDisk();
-    broadcastSse('BUSINESS_REGISTERED', { business, businesses: dbState.businesses, notifications: dbState.notifications });
+    broadcastSse('BUSINESS_REGISTERED', { business: savedBiz, businesses: dbState.businesses, notifications: dbState.notifications });
+    broadcastSse('REGISTRATION_ACTIVITY', activity);
     broadcastSse('SYNC', dbState);
-    console.log(`[Nova DB] Business registered: ${business.name} (${cleanEmail})`);
+    console.log(`[Nova DB] Business registered in real time: ${savedBiz.name} (Code: ${savedBiz.code}, Email: ${cleanEmail})`);
 
-    res.json({ success: true, business, businesses: dbState.businesses });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// Dedicated Client Registration endpoint
-app.post('/api/clients/register', (req, res) => {
-  try {
-    const { client, email, name, phone, avatar } = req.body;
-    const clientEmail = (client?.email || email || '').trim().toLowerCase();
-    if (!clientEmail) {
-      return res.status(400).json({ success: false, error: 'Correo de cliente requerido' });
-    }
-
-    const cleanName = (client?.name || name || `Cliente ${clientEmail.split('@')[0]}`).trim();
-    const cleanPhone = (client?.phone || phone || '').trim();
-    const cleanAvatar = client?.avatar || avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=200&auto=format&fit=crop&q=80';
-
-    let targetClient = dbState.clients.find(
-      (c) => c.email && c.email.trim().toLowerCase() === clientEmail
-    );
-
-    let isNew = false;
-    if (targetClient) {
-      if (cleanName && targetClient.name !== cleanName) targetClient.name = cleanName;
-      if (cleanPhone) targetClient.phone = cleanPhone;
-      if (client?.accountStatus) targetClient.accountStatus = client.accountStatus;
-    } else {
-      isNew = true;
-      targetClient = {
-        id: client?.id || `client-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-        name: cleanName,
-        email: clientEmail,
-        phone: cleanPhone,
-        avatar: cleanAvatar,
-        savedBusinessCodes: client?.savedBusinessCodes || [],
-        totalAppointmentsBooked: client?.totalAppointmentsBooked || 0,
-        createdAt: client?.createdAt || new Date().toISOString(),
-        accountStatus: client?.accountStatus || 'activa',
-      };
-      dbState.clients.unshift(targetClient);
-
-      // Create Admin notification for new client
-      dbState.notifications.unshift({
-        id: `notif-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-        recipientRole: 'admin',
-        title: '👤 Nuevo Cliente Registrado',
-        message: `${cleanName} (${clientEmail}) se registró en Nova Barber en tiempo real.`,
-        type: 'accepted',
-        timestamp: new Date().toISOString(),
-        read: false,
-      });
-    }
-
-    saveDbToDisk();
-    broadcastSse('CLIENT_REGISTERED', {
-      client: targetClient,
-      clients: dbState.clients,
-      notifications: dbState.notifications,
-      isNew,
-    });
-    broadcastSse('SYNC', dbState);
-    console.log(`[Nova DB] Client ${isNew ? 'registered' : 'synced'}: ${cleanName} (${clientEmail})`);
-
-    res.json({ success: true, client: targetClient, clients: dbState.clients, isNew });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// Dedicated Client Save endpoint
-app.post('/api/clients/save', (req, res) => {
-  try {
-    const client = req.body;
-    if (!client || !client.email) {
-      return res.status(400).json({ success: false, error: 'Datos de cliente inválidos' });
-    }
-
-    const cleanEmail = client.email.trim().toLowerCase();
-    const idx = dbState.clients.findIndex(
-      (c) => c.id === client.id || (c.email && c.email.trim().toLowerCase() === cleanEmail)
-    );
-
-    if (idx >= 0) {
-      dbState.clients[idx] = { ...dbState.clients[idx], ...client };
-    } else {
-      dbState.clients.unshift(client);
-    }
-
-    saveDbToDisk();
-    broadcastSse('CLIENT_REGISTERED', {
-      client,
-      clients: dbState.clients,
-      notifications: dbState.notifications,
-    });
-    broadcastSse('SYNC', dbState);
-
-    res.json({ success: true, client, clients: dbState.clients });
+    res.json({ success: true, business: savedBiz, businesses: dbState.businesses });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
   }

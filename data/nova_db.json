@@ -74,7 +74,8 @@
       ],
       "expenses": [],
       "id": "biz-1788549404395",
-      "code": "NOVA-BRB-69976",
+      "code": "NOVA-BRB-24932",
+      "aliases": ["NOVA-BRB-69976", "24932"],
       "accountStatus": "activa",
       "authCodeUsed": "NOVA-AUTH-9595",
       "createdAt": "2026-09-04T19:16:44.395Z"

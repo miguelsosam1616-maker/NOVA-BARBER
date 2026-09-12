@@ -70,13 +70,13 @@ export const TimeWheelPicker: React.FC<TimeWheelPickerProps> = ({
   const minTouchY = useRef<number | null>(null);
   const periodTouchY = useRef<number | null>(null);
 
-  // Sync state when value changes externally
+  // Sync state when value changes externally with guard against redundant renders
   useEffect(() => {
     if (value) {
       const parsed = parse24to12(value);
-      setHour12(parsed.hour12);
-      setMinute(parsed.minute);
-      setPeriod(parsed.period);
+      setHour12((prev) => (prev !== parsed.hour12 ? parsed.hour12 : prev));
+      setMinute((prev) => (prev !== parsed.minute ? parsed.minute : prev));
+      setPeriod((prev) => (prev !== parsed.period ? parsed.period : prev));
     }
   }, [value]);
 

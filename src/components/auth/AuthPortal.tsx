@@ -205,7 +205,7 @@ export const AuthPortal: React.FC<AuthPortalProps> = ({ onLoginSuccess }) => {
       expenses: [],
     };
 
-    const registration = db.registerBusiness(newBizData, optionalCode);
+    const registration = await db.registerBusinessAsync(newBizData, optionalCode);
     const registeredBiz = registration.business;
 
     db.setCurrentUser({

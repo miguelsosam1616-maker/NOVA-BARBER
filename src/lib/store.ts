@@ -40,6 +40,7 @@ const STORAGE_KEYS = {
   CURRENT_USER: 'nova_current_user_clean_v2',
   QUEUE: 'nova_queue_clean_v2',
   DAILY_CLOSURES: 'nova_daily_closures_clean_v2',
+  REGISTRATION_ACTIVITIES: 'nova_registration_activities_v2',
 };
 
 // Safe storage access
@@ -129,8 +130,28 @@ function syncFromServerPayload(data: any): boolean {
 
   if (Array.isArray(businesses)) {
     const local = getStored<Business[]>(STORAGE_KEYS.BUSINESSES, []);
-    if (JSON.stringify(local) !== JSON.stringify(businesses)) {
-      setStored(STORAGE_KEYS.BUSINESSES, businesses);
+    const bizMap = new Map<string, Business>();
+    businesses.forEach((b: Business) => {
+      if (b && b.id) bizMap.set(b.id, b);
+    });
+    // Preserve any local newly registered business that may not have arrived in sync yet
+    local.forEach((b: Business) => {
+      if (!b || !b.id) return;
+      if (!bizMap.has(b.id)) {
+        bizMap.set(b.id, b);
+      } else {
+        const srv = bizMap.get(b.id)!;
+        bizMap.set(b.id, {
+          ...srv,
+          ...b,
+          accountStatus: b.accountStatus || srv.accountStatus,
+          barbers: Array.isArray(b.barbers) && b.barbers.length > 0 ? b.barbers : srv.barbers,
+        });
+      }
+    });
+    const merged = Array.from(bizMap.values());
+    if (JSON.stringify(local) !== JSON.stringify(merged)) {
+      setStored(STORAGE_KEYS.BUSINESSES, merged);
       hasChanges = true;
     }
   }
@@ -378,6 +399,25 @@ function initRealtimeStream() {
         }
         lastSyncTimestamp = new Date().toISOString();
         notifyListeners();
+      } catch {}
+    });
+
+    eventSource.addEventListener('REGISTRATION_ACTIVITY', (e: MessageEvent) => {
+      try {
+        const payload = JSON.parse(e.data);
+        if (payload && payload.id) {
+          const activities = getStored<any[]>(STORAGE_KEYS.REGISTRATION_ACTIVITIES, []);
+          if (!activities.some((a) => a.id === payload.id)) {
+            activities.unshift(payload);
+            if (activities.length > 50) activities.pop();
+            setStored(STORAGE_KEYS.REGISTRATION_ACTIVITIES, activities);
+          }
+          const curr = getStored<CurrentUser | null>(STORAGE_KEYS.CURRENT_USER, null);
+          if (curr && (curr.role === 'admin' || isSuperAdminEmail(curr.email))) {
+            soundManager.playSuccessAlert();
+          }
+          notifyListeners();
+        }
       } catch {}
     });
 
@@ -868,9 +908,81 @@ export const db = {
     return this.getBusinesses().find((b) => b.id === id);
   },
 
-  getBusinessByCode(code: string): Business | undefined {
-    const cleanCode = code.trim().toUpperCase();
-    return this.getBusinesses().find((b) => b.code.toUpperCase() === cleanCode);
+  getBusinessByCode(codeOrTerm: string): Business | undefined {
+    if (!codeOrTerm) return undefined;
+    const clean = codeOrTerm.trim().toUpperCase();
+    const cleanAlpha = clean.replace(/[^A-Z0-9]/g, '');
+    const cleanDigits = clean.replace(/[^0-9]/g, '');
+
+    const businesses = this.getBusinesses();
+
+    // 1. Exact match on code or alias
+    let match = businesses.find((b) => {
+      if (b.code && b.code.toUpperCase() === clean) return true;
+      if (Array.isArray((b as any).aliases) && (b as any).aliases.some((a: string) => a.toUpperCase() === clean)) return true;
+      return false;
+    });
+    if (match) return match;
+
+    // 2. Alphanumeric match (ignoring dashes, hashes, spaces)
+    match = businesses.find((b) => {
+      const bAlpha = (b.code || '').replace(/[^A-Z0-9]/g, '').toUpperCase();
+      return bAlpha && bAlpha === cleanAlpha;
+    });
+    if (match) return match;
+
+    // 3. Numeric suffix (e.g. "24932" or "#24932")
+    if (cleanDigits.length >= 4) {
+      match = businesses.find((b) => {
+        const bDigits = (b.code || '').replace(/[^0-9]/g, '');
+        return bDigits.endsWith(cleanDigits) || bDigits === cleanDigits;
+      });
+      if (match) return match;
+    }
+
+    // 4. Phone number match
+    if (cleanDigits.length >= 7) {
+      match = businesses.find((b) => {
+        const bPhone = (b.phone || '').replace(/[^0-9]/g, '');
+        if (bPhone.includes(cleanDigits)) return true;
+        return b.barbers?.some((barb) => (barb.phone || '').replace(/[^0-9]/g, '').includes(cleanDigits));
+      });
+      if (match) return match;
+    }
+
+    // 5. Name, Barber Name, Nickname or Owner Email match
+    match = businesses.find((b) => {
+      if (b.name && b.name.toUpperCase().includes(clean)) return true;
+      if (b.ownerName && b.ownerName.toUpperCase().includes(clean)) return true;
+      if (b.ownerEmail && b.ownerEmail.toLowerCase() === clean.toLowerCase()) return true;
+      return b.barbers?.some(
+        (barb) =>
+          barb.name.toUpperCase().includes(clean) ||
+          (barb.nickname && barb.nickname.toUpperCase().includes(clean))
+      );
+    });
+
+    return match;
+  },
+
+  async findBusinessByCodeAsync(term: string): Promise<Business | undefined> {
+    const local = this.getBusinessByCode(term);
+    if (local) return local;
+
+    try {
+      const res = await fetch(`/api/businesses/find?q=${encodeURIComponent(term.trim())}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && data.business) {
+          const biz = data.business as Business;
+          this.saveBusiness(biz);
+          return biz;
+        }
+      }
+    } catch (e) {
+      console.warn('Error querying business from server:', e);
+    }
+    return undefined;
   },
 
   getBusinessByOwnerEmail(email: string): Business | undefined {
@@ -1038,6 +1150,73 @@ export const db = {
     } catch {}
 
     return { success: true, business: newBiz };
+  },
+
+  async registerBusinessAsync(
+    businessData: Omit<Business, 'id' | 'code' | 'createdAt'>,
+    optionalAuthCode?: string
+  ): Promise<{ success: boolean; business: Business }> {
+    const cleanEmail = (businessData.ownerEmail || '').trim().toLowerCase();
+    const cleanCode = (optionalAuthCode || '').trim().toUpperCase();
+
+    const newBiz: Business = {
+      ...businessData,
+      id: `biz-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      code: generateBusinessCode(businessData.type),
+      accountStatus: 'activa',
+      authCodeUsed: cleanCode || undefined,
+      createdAt: new Date().toISOString(),
+    };
+
+    // Save locally first
+    this.saveBusiness(newBiz);
+
+    if (cleanCode) {
+      const codes = this.getAuthCodes();
+      const foundCode = codes.find(
+        (c) =>
+          c.code.trim().toUpperCase() === cleanCode ||
+          c.code.replace(/[^A-Z0-9]/g, '') === cleanCode.replace(/[^A-Z0-9]/g, '')
+      );
+      if (foundCode) {
+        foundCode.status = 'claimed';
+        foundCode.claimedByEmail = cleanEmail;
+        foundCode.claimedBusinessId = newBiz.id;
+        foundCode.claimedBusinessName = newBiz.name;
+        foundCode.claimedAt = new Date().toISOString();
+        setStored(STORAGE_KEYS.AUTH_CODES, codes);
+      }
+    }
+
+    this.broadcast({ type: 'DATA_CHANGED' });
+    notifyListeners();
+
+    try {
+      const res = await fetch('/api/businesses/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ business: newBiz, authCode: cleanCode || undefined }),
+      });
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && json.business) {
+          const finalBiz = json.business as Business;
+          if (Array.isArray(json.businesses)) {
+            setStored(STORAGE_KEYS.BUSINESSES, json.businesses);
+          }
+          notifyListeners();
+          return { success: true, business: finalBiz };
+        }
+      }
+    } catch (e) {
+      console.warn('Error saving business to server:', e);
+    }
+
+    return { success: true, business: newBiz };
+  },
+
+  getRegistrationActivities(): any[] {
+    return getStored<any[]>(STORAGE_KEYS.REGISTRATION_ACTIVITIES, []);
   },
 
   // Register a new business (legacy compat: codes are optional, no longer required)
@@ -1900,6 +2079,7 @@ export function useNovaDb() {
     authCodes: db.getAuthCodes(),
     queue: db.getQueue(),
     dailyClosures: db.getDailyClosures(),
+    registrationActivities: db.getRegistrationActivities(),
     updateBusinessAccountStatus,
     deleteBusiness,
     updateClientAccountStatus,

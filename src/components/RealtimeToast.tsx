@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Bell, CheckCircle2, XCircle, AlertCircle, X } from 'lucide-react';
 import { AppNotification } from '../types';
@@ -19,7 +19,7 @@ export const RealtimeToast: React.FC<RealtimeToastProps> = ({
 }) => {
   const { notifications } = useNovaDb();
   const [activeToast, setActiveToast] = useState<AppNotification | null>(null);
-  const [lastSeenId, setLastSeenId] = useState<string>('');
+  const lastSeenIdRef = useRef<string>('');
 
   // Find the latest unread notification for the current active role & id
   const relevant = notifications.filter(
@@ -29,8 +29,8 @@ export const RealtimeToast: React.FC<RealtimeToastProps> = ({
   const latestId = latestNotification?.id || '';
 
   useEffect(() => {
-    if (latestId && latestId !== lastSeenId && latestNotification) {
-      setLastSeenId(latestId);
+    if (latestId && latestId !== lastSeenIdRef.current && latestNotification) {
+      lastSeenIdRef.current = latestId;
       setActiveToast(latestNotification);
 
       // Auto dismiss after 6 seconds
@@ -40,7 +40,7 @@ export const RealtimeToast: React.FC<RealtimeToastProps> = ({
 
       return () => clearTimeout(timer);
     }
-  }, [latestId, lastSeenId, latestNotification]);
+  }, [latestId]);
 
   if (!activeToast) return null;
 
